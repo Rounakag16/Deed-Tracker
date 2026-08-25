@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+client/node_modules/
+server/node_modules/
+
+# Env files (NEVER commit secrets)
+.env
+.env.local
+.env.*.local
+client/.env
+server/.env
+
+# Build output
+client/dist/
+client/dist-ssr/
+server/build/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor/OS
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+Thumbs.db
+*.suo
+*.sw?
+
+# Vite
+*.local
+
+# MongoDB local data (if you run it locally)
+data/db/
+
+# Misc
+coverage/
+.cache/
