@@ -14,8 +14,11 @@ async function request(path, options = {}) {
 
 export const api = {
   listWorkspaces: () => request("/workspaces"),
+  getWorkspace: (id) => request(`/workspaces/${id}`),
   createWorkspace: (name, description) =>
     request("/workspaces", { method: "POST", body: JSON.stringify({ name, description }) }),
+  updateWorkspace: (id, data) =>
+    request(`/workspaces/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
   deleteWorkspace: (id) => request(`/workspaces/${id}`, { method: "DELETE" }),
 
   listDeeds: (workspaceId) => request(`/workspaces/${workspaceId}/deeds`),

@@ -14,11 +14,15 @@ const COL_GAP = 40;
 const ROW_GAP = 70;
 const PADDING = 30;
 
-export default function LineageGraph({ workspace, onBack }) {
+export default function LineageGraph({ workspace, onBack, initialSelectedId }) {
   const [deeds, setDeeds] = useState([]);
   const [relationships, setRelationships] = useState([]);
   const [hoveredId, setHoveredId] = useState(null);
-  const [selectedId, setSelectedId] = useState(null);
+  const [selectedId, setSelectedId] = useState(initialSelectedId || null);
+
+  useEffect(() => {
+    if (initialSelectedId) setSelectedId(initialSelectedId);
+  }, [initialSelectedId]);
 
   useEffect(() => {
     api.listDeeds(workspace._id).then(setDeeds);

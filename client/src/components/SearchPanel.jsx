@@ -22,7 +22,7 @@ function deedLabel(deed) {
   return buyer ? `${num} - ${buyer}` : num;
 }
 
-export default function SearchPanel({ workspace, onlyThisWorkspace = true }) {
+export default function SearchPanel({ workspace, onlyThisWorkspace = true, onSelectDeed }) {
   const [q, setQ] = useState("");
   const [topic, setTopic] = useState("all");
   const [scopeWorkspace, setScopeWorkspace] = useState(onlyThisWorkspace);
@@ -77,8 +77,12 @@ export default function SearchPanel({ workspace, onlyThisWorkspace = true }) {
       {results && results.length > 0 && (
         <ul className="space-y-2">
           {results.map(({ deed, parents, children }) => (
-            <li key={deed._id} className="bg-white border rounded p-3">
-              <p className="font-medium">{deedLabel(deed)}</p>
+            <li
+              key={deed._id}
+              className="bg-white border rounded p-3 cursor-pointer hover:border-blue-400"
+              onClick={() => onSelectDeed && onSelectDeed(deed)}
+            >
+              <p className="font-medium text-blue-700 hover:underline">{deedLabel(deed)}</p>
               <p className="text-xs text-slate-500">
                 Mouja: {deed.landParcels?.map((lp) => lp.mouja).filter(Boolean).join(", ") || "—"}
               </p>

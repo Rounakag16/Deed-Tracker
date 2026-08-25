@@ -6,6 +6,8 @@ export default function WorkspaceList({ onOpen }) {
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [renamingId, setRenamingId] = useState(null);
+  const [renameValue, setRenameValue] = useState("");
 
   const load = () => {
     setLoading(true);
@@ -36,6 +38,22 @@ export default function WorkspaceList({ onOpen }) {
     load();
   };
 
+  const startRename = (w) => {
+    setRenamingId(w._id);
+    setRenameValue(w.name);
+  };
+
+  const submitRename = async (id) => {
+    if (!renameValue.trim()) return;
+    try {
+      await api.updateWorkspace(id, { name: renameValue.trim() });
+      setRenamingId(null);
+      load();
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
   return (
     <div className="max-w-2xl mx-auto py-12 px-4">
       <h1 className="text-2xl font-bold mb-6">DeedTracker — Workspaces</h1>
@@ -64,18 +82,53 @@ export default function WorkspaceList({ onOpen }) {
               key={w._id}
               className="flex items-center justify-between bg-white border rounded px-4 py-3"
             >
-              <button
-                onClick={() => onOpen(w)}
-                className="text-left font-medium hover:underline"
-              >
-                {w.name}
-              </button>
-              <button
-                onClick={() => handleDelete(w._id)}
-                className="text-red-600 text-sm hover:underline"
-              >
-                Delete
-              </button>
+              {renamingId === w._id ? (
+                <form
+                  className="flex gap-2 flex-1 mr-2"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    submitRename(w._id);
+                  }}
+                >
+                  <input
+                    autoFocus
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    className="flex-1 border rounded px-2 py-1"
+                  />
+                  <button className="text-sm text-green-700 hover:underline">Save</button>
+                  <button
+                    type="button"
+                    className="text-sm text-slate-500 hover:underline"
+                    onClick={() => setRenamingId(null)}
+                  >
+                    Cancel
+                  </button>
+                </form>
+              ) : (
+                <button
+                  onClick={() => onOpen(w)}
+                  className="text-left font-medium hover:underline"
+                >
+                  {w.name}
+                </button>
+              )}
+              {renamingId !== w._id && (
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => startRename(w)}
+                    className="text-slate-500 text-sm hover:underline"
+                  >
+                    Rename
+                  </button>
+                  <button
+                    onClick={() => handleDelete(w._id)}
+                    className="text-red-600 text-sm hover:underline"
+                  >
+                    Delete
+                  </button>
+                </div>
+              )}
             </li>
           ))}
         </ul>

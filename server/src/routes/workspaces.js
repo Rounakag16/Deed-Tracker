@@ -11,6 +11,13 @@ router.get("/", async (req, res) => {
   res.json(workspaces);
 });
 
+// GET /api/workspaces/:id
+router.get("/:id", async (req, res) => {
+  const workspace = await Workspace.findById(req.params.id);
+  if (!workspace) return res.status(404).json({ error: "Workspace not found" });
+  res.json(workspace);
+});
+
 // POST /api/workspaces
 router.post("/", async (req, res) => {
   const { name, description } = req.body;

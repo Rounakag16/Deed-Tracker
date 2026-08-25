@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { api } from "./api";
 import WorkspaceList from "./components/WorkspaceList";
 import Canvas from "./components/Canvas";
 import SearchPanel from "./components/SearchPanel";
@@ -6,7 +7,22 @@ import LineageGraph from "./components/LineageGraph";
 
 export default function App() {
   const [workspace, setWorkspace] = useState(null);
-  const [tab, setTab] = useState("canvas"); // "canvas" | "search"
+  const [tab, setTab] = useState("canvas"); // "canvas" | "search" | "lineage"
+  const [selectedDeedId, setSelectedDeedId] = useState(null);
+
+  const handleSelectSearchResult = async (deed) => {
+    if (workspace && String(deed.workspaceId) === String(workspace._id)) {
+      setSelectedDeedId(deed._id);
+      setTab("lineage");
+      return;
+    }
+    // Result belongs to a different workspace than the one currently open -
+    // switch to it first.
+    const ws = await api.getWorkspace(deed.workspaceId);
+    setWorkspace(ws);
+    setSelectedDeedId(deed._id);
+    setTab("lineage");
+  };
 
   if (!workspace) {
     return <WorkspaceList onOpen={setWorkspace} />;
@@ -44,9 +60,13 @@ export default function App() {
       {tab === "canvas" ? (
         <Canvas workspace={workspace} onView={() => setTab("lineage")} />
       ) : tab === "search" ? (
-        <SearchPanel workspace={workspace} />
+        <SearchPanel workspace={workspace} onSelectDeed={handleSelectSearchResult} />
       ) : (
-        <LineageGraph workspace={workspace} onBack={() => setTab("canvas")} />
+        <LineageGraph
+          workspace={workspace}
+          onBack={() => setTab("canvas")}
+          initialSelectedId={selectedDeedId}
+        />
       )}
     </div>
   );

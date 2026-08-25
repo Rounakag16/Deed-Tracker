@@ -1,0 +1,282 @@
+diff --git a/client/src/App.jsx b/client/src/App.jsx
+index b3bca24..956f066 100644
+--- a/client/src/App.jsx
++++ b/client/src/App.jsx
+@@ -1,4 +1,5 @@
+ import { useState } from "react";
++import { api } from "./api";
+ import WorkspaceList from "./components/WorkspaceList";
+ import Canvas from "./components/Canvas";
+ import SearchPanel from "./components/SearchPanel";
+@@ -6,7 +7,22 @@ import LineageGraph from "./components/LineageGraph";
+ 
+ export default function App() {
+   const [workspace, setWorkspace] = useState(null);
+-  const [tab, setTab] = useState("canvas"); // "canvas" | "search"
++  const [tab, setTab] = useState("canvas"); // "canvas" | "search" | "lineage"
++  const [selectedDeedId, setSelectedDeedId] = useState(null);
++
++  const handleSelectSearchResult = async (deed) => {
++    if (workspace && String(deed.workspaceId) === String(workspace._id)) {
++      setSelectedDeedId(deed._id);
++      setTab("lineage");
++      return;
++    }
++    // Result belongs to a different workspace than the one currently open -
++    // switch to it first.
++    const ws = await api.getWorkspace(deed.workspaceId);
++    setWorkspace(ws);
++    setSelectedDeedId(deed._id);
++    setTab("lineage");
++  };
+ 
+   if (!workspace) {
+     return <WorkspaceList onOpen={setWorkspace} />;
+@@ -44,9 +60,13 @@ export default function App() {
+       {tab === "canvas" ? (
+         <Canvas workspace={workspace} onView={() => setTab("lineage")} />
+       ) : tab === "search" ? (
+-        <SearchPanel workspace={workspace} />
++        <SearchPanel workspace={workspace} onSelectDeed={handleSelectSearchResult} />
+       ) : (
+-        <LineageGraph workspace={workspace} onBack={() => setTab("canvas")} />
++        <LineageGraph
++          workspace={workspace}
++          onBack={() => setTab("canvas")}
++          initialSelectedId={selectedDeedId}
++        />
+       )}
+     </div>
+   );
+diff --git a/client/src/api.js b/client/src/api.js
+index cf23310..3a52890 100644
+--- a/client/src/api.js
++++ b/client/src/api.js
+@@ -14,8 +14,11 @@ async function request(path, options = {}) {
+ 
+ export const api = {
+   listWorkspaces: () => request("/workspaces"),
++  getWorkspace: (id) => request(`/workspaces/${id}`),
+   createWorkspace: (name, description) =>
+     request("/workspaces", { method: "POST", body: JSON.stringify({ name, description }) }),
++  updateWorkspace: (id, data) =>
++    request(`/workspaces/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+   deleteWorkspace: (id) => request(`/workspaces/${id}`, { method: "DELETE" }),
+ 
+   listDeeds: (workspaceId) => request(`/workspaces/${workspaceId}/deeds`),
+diff --git a/client/src/components/Canvas.jsx b/client/src/components/Canvas.jsx
+index b9d2c7e..2264616 100644
+--- a/client/src/components/Canvas.jsx
++++ b/client/src/components/Canvas.jsx
+@@ -55,6 +55,20 @@ export default function Canvas({ workspace, onView }) {
+     return d ? deedLabel(d) : key;
+   };
+ 
++  // Same deed number appearing on more than one deed in this workspace is
++  // usually a typo (or a legitimate re-use across offices) - flag it, don't
++  // block on it.
++  const duplicateDeedNumbers = useMemo(() => {
++    const byNumber = new Map();
++    allCards.forEach((d) => {
++      const num = d.deedInfo?.deedNumber?.trim();
++      if (!num) return;
++      if (!byNumber.has(num)) byNumber.set(num, []);
++      byNumber.get(num).push(d);
++    });
++    return [...byNumber.entries()].filter(([, group]) => group.length > 1);
++  }, [allCards]);
++
+   // All edges that should influence layout + rendering: saved relationships
+   // plus links the user has wired up but not saved yet.
+   const graphEdges = useMemo(
+@@ -335,6 +349,20 @@ export default function Canvas({ workspace, onView }) {
+ 
+       {error && <p className="text-red-600 mb-4">{error}</p>}
+ 
++      {duplicateDeedNumbers.length > 0 && (
++        <div className="border border-amber-400 bg-amber-50 text-amber-800 rounded p-3 mb-4 text-sm">
++          <p className="font-medium mb-1">Duplicate deed number(s) in this workspace:</p>
++          <ul className="list-disc list-inside">
++            {duplicateDeedNumbers.map(([num, group]) => (
++              <li key={num}>
++                "{num}" used by {group.length} deeds
++                {group.some((d) => !d._id) ? " (including an unsaved one)" : ""}
++              </li>
++            ))}
++          </ul>
++        </div>
++      )}
++
+       {edgeDraft && (
+         <div className="border border-blue-400 bg-blue-50 rounded p-3 mb-4 text-sm">
+           <p className="mb-2">
+diff --git a/client/src/components/LineageGraph.jsx b/client/src/components/LineageGraph.jsx
+index efe5163..18f97ae 100644
+--- a/client/src/components/LineageGraph.jsx
++++ b/client/src/components/LineageGraph.jsx
+@@ -14,11 +14,15 @@ const COL_GAP = 40;
+ const ROW_GAP = 70;
+ const PADDING = 30;
+ 
+-export default function LineageGraph({ workspace, onBack }) {
++export default function LineageGraph({ workspace, onBack, initialSelectedId }) {
+   const [deeds, setDeeds] = useState([]);
+   const [relationships, setRelationships] = useState([]);
+   const [hoveredId, setHoveredId] = useState(null);
+-  const [selectedId, setSelectedId] = useState(null);
++  const [selectedId, setSelectedId] = useState(initialSelectedId || null);
++
++  useEffect(() => {
++    if (initialSelectedId) setSelectedId(initialSelectedId);
++  }, [initialSelectedId]);
+ 
+   useEffect(() => {
+     api.listDeeds(workspace._id).then(setDeeds);
+diff --git a/client/src/components/SearchPanel.jsx b/client/src/components/SearchPanel.jsx
+index b4a7d2a..ab4de71 100644
+--- a/client/src/components/SearchPanel.jsx
++++ b/client/src/components/SearchPanel.jsx
+@@ -22,7 +22,7 @@ function deedLabel(deed) {
+   return buyer ? `${num} - ${buyer}` : num;
+ }
+ 
+-export default function SearchPanel({ workspace, onlyThisWorkspace = true }) {
++export default function SearchPanel({ workspace, onlyThisWorkspace = true, onSelectDeed }) {
+   const [q, setQ] = useState("");
+   const [topic, setTopic] = useState("all");
+   const [scopeWorkspace, setScopeWorkspace] = useState(onlyThisWorkspace);
+@@ -77,8 +77,12 @@ export default function SearchPanel({ workspace, onlyThisWorkspace = true }) {
+       {results && results.length > 0 && (
+         <ul className="space-y-2">
+           {results.map(({ deed, parents, children }) => (
+-            <li key={deed._id} className="bg-white border rounded p-3">
+-              <p className="font-medium">{deedLabel(deed)}</p>
++            <li
++              key={deed._id}
++              className="bg-white border rounded p-3 cursor-pointer hover:border-blue-400"
++              onClick={() => onSelectDeed && onSelectDeed(deed)}
++            >
++              <p className="font-medium text-blue-700 hover:underline">{deedLabel(deed)}</p>
+               <p className="text-xs text-slate-500">
+                 Mouja: {deed.landParcels?.map((lp) => lp.mouja).filter(Boolean).join(", ") || "—"}
+               </p>
+diff --git a/client/src/components/WorkspaceList.jsx b/client/src/components/WorkspaceList.jsx
+index 575f2ae..f0cfdf9 100644
+--- a/client/src/components/WorkspaceList.jsx
++++ b/client/src/components/WorkspaceList.jsx
+@@ -6,6 +6,8 @@ export default function WorkspaceList({ onOpen }) {
+   const [name, setName] = useState("");
+   const [loading, setLoading] = useState(true);
+   const [error, setError] = useState("");
++  const [renamingId, setRenamingId] = useState(null);
++  const [renameValue, setRenameValue] = useState("");
+ 
+   const load = () => {
+     setLoading(true);
+@@ -36,6 +38,22 @@ export default function WorkspaceList({ onOpen }) {
+     load();
+   };
+ 
++  const startRename = (w) => {
++    setRenamingId(w._id);
++    setRenameValue(w.name);
++  };
++
++  const submitRename = async (id) => {
++    if (!renameValue.trim()) return;
++    try {
++      await api.updateWorkspace(id, { name: renameValue.trim() });
++      setRenamingId(null);
++      load();
++    } catch (e) {
++      setError(e.message);
++    }
++  };
++
+   return (
+     <div className="max-w-2xl mx-auto py-12 px-4">
+       <h1 className="text-2xl font-bold mb-6">DeedTracker — Workspaces</h1>
+@@ -64,18 +82,53 @@ export default function WorkspaceList({ onOpen }) {
+               key={w._id}
+               className="flex items-center justify-between bg-white border rounded px-4 py-3"
+             >
+-              <button
+-                onClick={() => onOpen(w)}
+-                className="text-left font-medium hover:underline"
+-              >
+-                {w.name}
+-              </button>
+-              <button
+-                onClick={() => handleDelete(w._id)}
+-                className="text-red-600 text-sm hover:underline"
+-              >
+-                Delete
+-              </button>
++              {renamingId === w._id ? (
++                <form
++                  className="flex gap-2 flex-1 mr-2"
++                  onSubmit={(e) => {
++                    e.preventDefault();
++                    submitRename(w._id);
++                  }}
++                >
++                  <input
++                    autoFocus
++                    value={renameValue}
++                    onChange={(e) => setRenameValue(e.target.value)}
++                    className="flex-1 border rounded px-2 py-1"
++                  />
++                  <button className="text-sm text-green-700 hover:underline">Save</button>
++                  <button
++                    type="button"
++                    className="text-sm text-slate-500 hover:underline"
++                    onClick={() => setRenamingId(null)}
++                  >
++                    Cancel
++                  </button>
++                </form>
++              ) : (
++                <button
++                  onClick={() => onOpen(w)}
++                  className="text-left font-medium hover:underline"
++                >
++                  {w.name}
++                </button>
++              )}
++              {renamingId !== w._id && (
++                <div className="flex gap-3">
++                  <button
++                    onClick={() => startRename(w)}
++                    className="text-slate-500 text-sm hover:underline"
++                  >
++                    Rename
++                  </button>
++                  <button
++                    onClick={() => handleDelete(w._id)}
++                    className="text-red-600 text-sm hover:underline"
++                  >
++                    Delete
++                  </button>
++                </div>
++              )}
+             </li>
+           ))}
+         </ul>
+diff --git a/server/src/routes/workspaces.js b/server/src/routes/workspaces.js
+index cd40885..43cf28f 100644
+--- a/server/src/routes/workspaces.js
++++ b/server/src/routes/workspaces.js
+@@ -11,6 +11,13 @@ router.get("/", async (req, res) => {
+   res.json(workspaces);
+ });
+ 
++// GET /api/workspaces/:id
++router.get("/:id", async (req, res) => {
++  const workspace = await Workspace.findById(req.params.id);
++  if (!workspace) return res.status(404).json({ error: "Workspace not found" });
++  res.json(workspace);
++});
++
+ // POST /api/workspaces
+ router.post("/", async (req, res) => {
+   const { name, description } = req.body;

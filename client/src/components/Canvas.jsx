@@ -55,6 +55,20 @@ export default function Canvas({ workspace, onView }) {
     return d ? deedLabel(d) : key;
   };
 
+  // Same deed number appearing on more than one deed in this workspace is
+  // usually a typo (or a legitimate re-use across offices) - flag it, don't
+  // block on it.
+  const duplicateDeedNumbers = useMemo(() => {
+    const byNumber = new Map();
+    allCards.forEach((d) => {
+      const num = d.deedInfo?.deedNumber?.trim();
+      if (!num) return;
+      if (!byNumber.has(num)) byNumber.set(num, []);
+      byNumber.get(num).push(d);
+    });
+    return [...byNumber.entries()].filter(([, group]) => group.length > 1);
+  }, [allCards]);
+
   // All edges that should influence layout + rendering: saved relationships
   // plus links the user has wired up but not saved yet.
   const graphEdges = useMemo(
@@ -334,6 +348,20 @@ export default function Canvas({ workspace, onView }) {
       </p>
 
       {error && <p className="text-red-600 mb-4">{error}</p>}
+
+      {duplicateDeedNumbers.length > 0 && (
+        <div className="border border-amber-400 bg-amber-50 text-amber-800 rounded p-3 mb-4 text-sm">
+          <p className="font-medium mb-1">Duplicate deed number(s) in this workspace:</p>
+          <ul className="list-disc list-inside">
+            {duplicateDeedNumbers.map(([num, group]) => (
+              <li key={num}>
+                "{num}" used by {group.length} deeds
+                {group.some((d) => !d._id) ? " (including an unsaved one)" : ""}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {edgeDraft && (
         <div className="border border-blue-400 bg-blue-50 rounded p-3 mb-4 text-sm">
