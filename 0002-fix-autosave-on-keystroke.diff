@@ -1,0 +1,112 @@
+diff --git a/client/src/components/Canvas.jsx b/client/src/components/Canvas.jsx
+index 37fb9c6..3af2fc7 100644
+--- a/client/src/components/Canvas.jsx
++++ b/client/src/components/Canvas.jsx
+@@ -240,9 +240,10 @@ export default function Canvas({ workspace }) {
+             isDraft={false}
+             connectMode={connectMode}
+             isSelectedForConnect={connectFirstPick === deed._id}
+-            onChange={(next) => {
++            onSave={async (next) => {
+               const { _id, __v, createdAt, updatedAt, workspaceId, ...fields } = next;
+-              api.updateDeed(workspace._id, deed._id, fields).then(load);
++              await api.updateDeed(workspace._id, deed._id, fields);
++              load();
+             }}
+             onDelete={() => deleteSavedDeed(deed._id)}
+             onSelectForConnect={handleSelectForConnect}
+diff --git a/client/src/components/DeedCard.jsx b/client/src/components/DeedCard.jsx
+index 14db421..9d8a85f 100644
+--- a/client/src/components/DeedCard.jsx
++++ b/client/src/components/DeedCard.jsx
+@@ -1,4 +1,4 @@
+-import { useState } from "react";
++import { useEffect, useState } from "react";
+ import DeedForm from "./DeedForm";
+ 
+ export default function DeedCard({
+@@ -6,15 +6,53 @@ export default function DeedCard({
+   isDraft,
+   isSelectedForConnect,
+   connectMode,
+-  onChange,
++  onChange, // used for drafts: fires on every keystroke, kept in memory only (cheap)
++  onSave, // used for saved deeds: only called when the user clicks Save
+   onDelete,
+   onSelectForConnect,
+ }) {
+   const [expanded, setExpanded] = useState(isDraft);
+ 
++  // Saved deeds buffer edits locally so typing doesn't PUT + reload on
++  // every keystroke. Only synced back to `deed` prop when not dirty, so a
++  // background reload doesn't clobber in-progress edits.
++  const [localDeed, setLocalDeed] = useState(deed);
++  const [dirty, setDirty] = useState(false);
++  const [savingLocal, setSavingLocal] = useState(false);
++
++  useEffect(() => {
++    if (!dirty) setLocalDeed(deed);
++  }, [deed, dirty]);
++
++  const displayDeed = isDraft ? deed : localDeed;
++
++  const handleFormChange = (next) => {
++    if (isDraft) {
++      onChange(next);
++    } else {
++      setLocalDeed(next);
++      setDirty(true);
++    }
++  };
++
++  const handleSaveClick = async () => {
++    setSavingLocal(true);
++    try {
++      await onSave(localDeed);
++      setDirty(false);
++    } finally {
++      setSavingLocal(false);
++    }
++  };
++
++  const handleDiscardClick = () => {
++    setLocalDeed(deed);
++    setDirty(false);
++  };
++
+   const summary =
+-    deed.deedInfo?.deedNumber || (isDraft ? "(unsaved deed)" : "(no deed no.)");
+-  const buyer = deed.purchasers?.[0]?.name;
++    displayDeed.deedInfo?.deedNumber || (isDraft ? "(unsaved deed)" : "(no deed no.)");
++  const buyer = displayDeed.purchasers?.[0]?.name;
+ 
+   return (
+     <div
+@@ -56,7 +94,26 @@ export default function DeedCard({
+ 
+       {expanded && !connectMode && (
+         <div className="mt-3 border-t pt-3">
+-          <DeedForm deed={deed} onChange={onChange} />
++          <DeedForm deed={displayDeed} onChange={handleFormChange} />
++          {!isDraft && dirty && (
++            <div className="flex gap-2 mt-2">
++              <button
++                type="button"
++                className="bg-green-600 text-white text-xs px-3 py-1 rounded"
++                onClick={handleSaveClick}
++                disabled={savingLocal}
++              >
++                {savingLocal ? "Saving…" : "Save changes"}
++              </button>
++              <button
++                type="button"
++                className="text-xs px-3 py-1 border rounded"
++                onClick={handleDiscardClick}
++              >
++                Discard
++              </button>
++            </div>
++          )}
+         </div>
+       )}
+     </div>

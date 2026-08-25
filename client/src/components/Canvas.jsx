@@ -240,9 +240,10 @@ export default function Canvas({ workspace }) {
             isDraft={false}
             connectMode={connectMode}
             isSelectedForConnect={connectFirstPick === deed._id}
-            onChange={(next) => {
+            onSave={async (next) => {
               const { _id, __v, createdAt, updatedAt, workspaceId, ...fields } = next;
-              api.updateDeed(workspace._id, deed._id, fields).then(load);
+              await api.updateDeed(workspace._id, deed._id, fields);
+              load();
             }}
             onDelete={() => deleteSavedDeed(deed._id)}
             onSelectForConnect={handleSelectForConnect}
