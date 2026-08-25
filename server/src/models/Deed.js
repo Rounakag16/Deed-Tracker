@@ -49,6 +49,11 @@ const deedInfoSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const positionSchema = new mongoose.Schema(
+  { x: Number, y: Number },
+  { _id: false }
+);
+
 const deedSchema = new mongoose.Schema(
   {
     workspaceId: {
@@ -62,6 +67,9 @@ const deedSchema = new mongoose.Schema(
     sellers: { type: [personSchema], default: () => [{ name: "", fatherName: "" }] },
     deedInfo: { type: deedInfoSchema, default: () => ({}) },
     landParcels: { type: [landParcelSchema], default: () => [{}] },
+    // Manual canvas placement. Absent/null = not yet manually placed, so the
+    // client falls back to its auto-arranged (layered) position for this deed.
+    position: { type: positionSchema, default: null },
   },
   { timestamps: true }
 );

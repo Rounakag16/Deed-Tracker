@@ -28,10 +28,13 @@ export default function Canvas({ workspace, onView }) {
   const [edgeDraft, setEdgeDraft] = useState(null); // { sourceKey, targetKey } awaiting area/note confirm
   const [isDragging, setIsDragging] = useState(false);
   const [dragPos, setDragPos] = useState(null);
+  const [isCardDragging, setIsCardDragging] = useState(false);
+  const [liveDragPos, setLiveDragPos] = useState(null); // { key, x, y } while a card is being repositioned
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const draggingSourceRef = useRef(null);
+  const cardDragRef = useRef(null);
   const contentRef = useRef(null);
   const wrapperRefs = useRef(new Map());
   const topDotRefs = useRef(new Map());
@@ -100,7 +103,7 @@ export default function Canvas({ workspace, onView }) {
     setAnchors(next);
   }, [allKeys]);
 
-  useLayoutEffect(recomputeAnchors, [recomputeAnchors, positions]);
+  useLayoutEffect(recomputeAnchors, [recomputeAnchors, positions, liveDragPos, savedDeeds, draftDeeds]);
 
   useEffect(() => {
     const observer = new ResizeObserver(recomputeAnchors);
@@ -159,6 +162,74 @@ export default function Canvas({ workspace, onView }) {
       window.removeEventListener("mouseup", handleUp);
     };
   }, [isDragging]);
+
+  // A manually-placed deed uses its stored position; otherwise fall back to
+  // the auto-arranged layered position. While actively dragging a card, its
+  // live (uncommitted) position wins so the move feels immediate.
+  const resolvedPos = (key, deed) => {
+    if (liveDragPos && liveDragPos.key === key) return { x: liveDragPos.x, y: liveDragPos.y };
+    if (deed.position) return deed.position;
+    return positions.get(key);
+  };
+
+  const commitCardPosition = (key, pos) => {
+    const draft = draftDeeds.find((d) => d._tempId === key);
+    if (draft) {
+      updateDraft(key, { ...draft, position: pos });
+      return;
+    }
+    api.updateDeed(workspace._id, key, { position: pos }).then(load);
+  };
+
+  // Drag-to-move: mousedown anywhere on a card except its buttons/inputs/dots
+  // starts repositioning it. Dots already stopPropagation() so they don't
+  // trigger this.
+  const startCardDrag = (key, currentPos) => (e) => {
+    if (e.target.closest("button, input, textarea, select")) return;
+    e.preventDefault();
+    cardDragRef.current = {
+      key,
+      startMouseX: e.clientX,
+      startMouseY: e.clientY,
+      startX: currentPos.x,
+      startY: currentPos.y,
+    };
+    setIsCardDragging(true);
+  };
+
+  useEffect(() => {
+    if (!isCardDragging) return;
+    const handleMove = (e) => {
+      const d = cardDragRef.current;
+      if (!d) return;
+      const dx = e.clientX - d.startMouseX;
+      const dy = e.clientY - d.startMouseY;
+      if (Math.hypot(dx, dy) < 3) return; // ignore tiny jitter from a plain click
+      setLiveDragPos({ key: d.key, x: Math.max(0, d.startX + dx), y: Math.max(0, d.startY + dy) });
+    };
+    const handleUp = () => {
+      cardDragRef.current = null;
+      setIsCardDragging(false);
+      setLiveDragPos((current) => {
+        if (current) commitCardPosition(current.key, { x: current.x, y: current.y });
+        return null;
+      });
+    };
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+  }, [isCardDragging]);
+
+  const resetLayout = async () => {
+    if (!confirm("Snap every deed back to the auto-arranged layout?")) return;
+    setDraftDeeds((prev) => prev.map((d) => ({ ...d, position: null })));
+    const placed = savedDeeds.filter((d) => d.position);
+    await Promise.all(placed.map((d) => api.updateDeed(workspace._id, d._id, { position: null })));
+    load();
+  };
 
   const addDraftDeed = () => {
     setDraftDeeds((prev) => [...prev, { _tempId: nextTempId(), ...blankDeed() }]);
@@ -236,6 +307,9 @@ export default function Canvas({ workspace, onView }) {
         <button onClick={onView} className="border border-slate-900 px-3 py-1.5 rounded text-sm">
           View
         </button>
+        <button onClick={resetLayout} className="border border-slate-400 text-slate-600 px-3 py-1.5 rounded text-sm">
+          Reset Layout
+        </button>
         <a
           href={api.exportWorkspaceUrl(workspace._id)}
           className="border border-green-700 text-green-700 px-3 py-1.5 rounded text-sm"
@@ -254,8 +328,9 @@ export default function Canvas({ workspace, onView }) {
       </div>
 
       <p className="text-sm text-slate-500 mb-4">
-        Drag from the dot at the bottom of a deed to the dot at the top of another to mark that
-        it derives from it. New deeds and links only take effect once you click Save.
+        Drag a card to reposition it, or drag from the dot at the bottom of a deed to the dot at
+        the top of another to mark that it derives from it. New deeds and links only take effect
+        once you click Save; a moved card's position saves immediately.
       </p>
 
       {error && <p className="text-red-600 mb-4">{error}</p>}
@@ -371,9 +446,10 @@ export default function Canvas({ workspace, onView }) {
 
             {allCards.map((deed) => {
               const key = keyFor(deed);
-              const pos = positions.get(key);
+              const pos = resolvedPos(key, deed);
               const isDraft = !deed._id;
               if (!pos) return null;
+              const isBeingDragged = liveDragPos?.key === key;
               return (
                 <div
                   key={key}
@@ -381,7 +457,15 @@ export default function Canvas({ workspace, onView }) {
                     if (el) wrapperRefs.current.set(key, el);
                     else wrapperRefs.current.delete(key);
                   }}
-                  style={{ position: "absolute", left: pos.x, top: pos.y, width: NODE_W }}
+                  onMouseDown={startCardDrag(key, pos)}
+                  style={{
+                    position: "absolute",
+                    left: pos.x,
+                    top: pos.y,
+                    width: NODE_W,
+                    cursor: isBeingDragged ? "grabbing" : "grab",
+                    zIndex: isBeingDragged ? 20 : 1,
+                  }}
                 >
                   <div
                     ref={(el) => {
