@@ -38,23 +38,15 @@ export default function App() {
           >
             Search
           </button>
-          <button
-            onClick={() => setTab("lineage")}
-            className={`py-3 border-b-2 text-sm px-2 ${
-              tab === "lineage" ? "border-slate-900 font-medium" : "border-transparent text-slate-500"
-            }`}
-          >
-            Lineage
-          </button>
         </div>
       </div>
 
       {tab === "canvas" ? (
-        <Canvas workspace={workspace} />
+        <Canvas workspace={workspace} onView={() => setTab("lineage")} />
       ) : tab === "search" ? (
         <SearchPanel workspace={workspace} />
       ) : (
-        <LineageGraph workspace={workspace} />
+        <LineageGraph workspace={workspace} onBack={() => setTab("canvas")} />
       )}
     </div>
   );

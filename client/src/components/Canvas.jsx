@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import DeedCard from "./DeedCard";
 import { blankDeed } from "./DeedForm";
+import { computeLayers, computePositions } from "../layout";
 
 let tempIdCounter = 0;
 const nextTempId = () => `draft_${++tempIdCounter}`;
@@ -12,16 +13,30 @@ function deedLabel(deed) {
   return buyer ? `${num} - ${buyer}` : num;
 }
 
-export default function Canvas({ workspace }) {
+const NODE_W = 320;
+const NODE_H_ESTIMATE = 110; // only used for layout spacing; actual dot
+// positions are measured from the real DOM so expanded cards don't break it
+const COL_GAP = 60;
+const ROW_GAP = 90;
+const PADDING = 50;
+
+export default function Canvas({ workspace, onView }) {
   const [savedDeeds, setSavedDeeds] = useState([]);
   const [savedRelationships, setSavedRelationships] = useState([]);
   const [draftDeeds, setDraftDeeds] = useState([]); // { _tempId, ...deedFields }
   const [pendingEdges, setPendingEdges] = useState([]); // { sourceKey, targetKey, areaTransferred, note }
-  const [connectMode, setConnectMode] = useState(false);
-  const [connectFirstPick, setConnectFirstPick] = useState(null);
-  const [edgeDraft, setEdgeDraft] = useState(null); // { sourceKey, targetKey } awaiting area/note
+  const [edgeDraft, setEdgeDraft] = useState(null); // { sourceKey, targetKey } awaiting area/note confirm
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragPos, setDragPos] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  const draggingSourceRef = useRef(null);
+  const contentRef = useRef(null);
+  const wrapperRefs = useRef(new Map());
+  const topDotRefs = useRef(new Map());
+  const bottomDotRefs = useRef(new Map());
+  const [anchors, setAnchors] = useState(new Map());
 
   const load = () => {
     api.listDeeds(workspace._id).then(setSavedDeeds);
@@ -29,24 +44,124 @@ export default function Canvas({ workspace }) {
   };
   useEffect(load, [workspace._id]);
 
-  // A "key" identifies any deed on screen, saved or draft, so edges can
-  // reference either uniformly until save time.
   const keyFor = (deed) => (deed._id ? deed._id : deed._tempId);
-  const allCards = [...savedDeeds.map((d) => ({ ...d })), ...draftDeeds];
+  const allCards = useMemo(() => [...savedDeeds, ...draftDeeds], [savedDeeds, draftDeeds]);
+  const allKeys = useMemo(() => allCards.map(keyFor), [allCards]);
   const labelForKey = (key) => {
     const d = allCards.find((c) => keyFor(c) === key);
     return d ? deedLabel(d) : key;
   };
 
-  const addDraftDeed = () => {
-    setDraftDeeds((prev) => [...prev, { _tempId: nextTempId(), ...blankDeed() }]);
+  // All edges that should influence layout + rendering: saved relationships
+  // plus links the user has wired up but not saved yet.
+  const graphEdges = useMemo(
+    () => [
+      ...savedRelationships.map((r) => ({
+        sourceKey: String(r.sourceDeedId),
+        targetKey: String(r.targetDeedId),
+        areaTransferred: r.areaTransferred,
+        _id: r._id,
+        saved: true,
+      })),
+      ...pendingEdges.map((e, pendingIndex) => ({ ...e, saved: false, pendingIndex })),
+    ],
+    [savedRelationships, pendingEdges]
+  );
+
+  const { positions, width, height } = useMemo(() => {
+    const layerById = computeLayers(allKeys, graphEdges);
+    return computePositions(allKeys, layerById, {
+      nodeW: NODE_W,
+      nodeH: NODE_H_ESTIMATE,
+      colGap: COL_GAP,
+      rowGap: ROW_GAP,
+      padding: PADDING,
+      direction: "vertical",
+    });
+  }, [allKeys, graphEdges]);
+
+  // Measure real dot positions from the DOM so edges connect to wherever a
+  // card's top/bottom actually is, regardless of expanded/collapsed height.
+  const recomputeAnchors = useCallback(() => {
+    if (!contentRef.current) return;
+    const contentRect = contentRef.current.getBoundingClientRect();
+    const next = new Map();
+    allKeys.forEach((key) => {
+      const topEl = topDotRefs.current.get(key);
+      const bottomEl = bottomDotRefs.current.get(key);
+      if (!topEl || !bottomEl) return;
+      const tr = topEl.getBoundingClientRect();
+      const br = bottomEl.getBoundingClientRect();
+      next.set(key, {
+        top: { x: tr.left + tr.width / 2 - contentRect.left, y: tr.top + tr.height / 2 - contentRect.top },
+        bottom: { x: br.left + br.width / 2 - contentRect.left, y: br.top + br.height / 2 - contentRect.top },
+      });
+    });
+    setAnchors(next);
+  }, [allKeys]);
+
+  useLayoutEffect(recomputeAnchors, [recomputeAnchors, positions]);
+
+  useEffect(() => {
+    const observer = new ResizeObserver(recomputeAnchors);
+    wrapperRefs.current.forEach((el) => el && observer.observe(el));
+    window.addEventListener("resize", recomputeAnchors);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", recomputeAnchors);
+    };
+  }, [allKeys, recomputeAnchors]);
+
+  // Drag-to-wire: mousedown on a card's bottom (output) dot starts a drag;
+  // dropping on another card's top (input) dot queues a link for confirmation.
+  const startDrag = (sourceKey) => (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    draggingSourceRef.current = sourceKey;
+    setIsDragging(true);
   };
 
-  const addFiveDraftDeeds = () => {
-    setDraftDeeds((prev) => [
-      ...prev,
-      ...Array.from({ length: 5 }, () => ({ _tempId: nextTempId(), ...blankDeed() })),
-    ]);
+  useEffect(() => {
+    if (!isDragging) return;
+    const handleMove = (e) => {
+      if (!contentRef.current) return;
+      const rect = contentRef.current.getBoundingClientRect();
+      setDragPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    };
+    const handleUp = (e) => {
+      let targetKey = null;
+      for (const [key, el] of topDotRefs.current.entries()) {
+        if (!el) continue;
+        const r = el.getBoundingClientRect();
+        const pad = 10;
+        if (
+          e.clientX >= r.left - pad &&
+          e.clientX <= r.right + pad &&
+          e.clientY >= r.top - pad &&
+          e.clientY <= r.bottom + pad
+        ) {
+          targetKey = key;
+          break;
+        }
+      }
+      const sourceKey = draggingSourceRef.current;
+      draggingSourceRef.current = null;
+      setIsDragging(false);
+      setDragPos(null);
+      if (targetKey && sourceKey && targetKey !== sourceKey) {
+        setEdgeDraft({ sourceKey, targetKey, areaTransferred: "", note: "" });
+      }
+    };
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+  }, [isDragging]);
+
+  const addDraftDeed = () => {
+    setDraftDeeds((prev) => [...prev, { _tempId: nextTempId(), ...blankDeed() }]);
   };
 
   const updateDraft = (tempId, next) => {
@@ -55,9 +170,7 @@ export default function Canvas({ workspace }) {
 
   const removeDraft = (tempId) => {
     setDraftDeeds((prev) => prev.filter((d) => d._tempId !== tempId));
-    setPendingEdges((prev) =>
-      prev.filter((e) => e.sourceKey !== tempId && e.targetKey !== tempId)
-    );
+    setPendingEdges((prev) => prev.filter((e) => e.sourceKey !== tempId && e.targetKey !== tempId));
   };
 
   const deleteSavedDeed = async (id) => {
@@ -66,26 +179,15 @@ export default function Canvas({ workspace }) {
     load();
   };
 
-  const handleSelectForConnect = (deed) => {
-    const key = keyFor(deed);
-    if (!connectFirstPick) {
-      setConnectFirstPick(key);
-      return;
-    }
-    if (connectFirstPick === key) {
-      setConnectFirstPick(null); // clicked same card again, deselect
-      return;
-    }
-    setEdgeDraft({ sourceKey: connectFirstPick, targetKey: key, areaTransferred: "", note: "" });
-    setConnectFirstPick(null);
-  };
-
   const confirmEdgeDraft = () => {
     setPendingEdges((prev) => [...prev, edgeDraft]);
     setEdgeDraft(null);
   };
 
+  const removePendingEdge = (i) => setPendingEdges((prev) => prev.filter((_, idx) => idx !== i));
+
   const deleteSavedRelationship = async (id) => {
+    if (!confirm("Remove this link?")) return;
     await api.deleteRelationship(workspace._id, id);
     load();
   };
@@ -94,7 +196,6 @@ export default function Canvas({ workspace }) {
     setSaving(true);
     setError("");
     try {
-      // 1. Persist new deeds, build tempId -> real _id map.
       const idMap = {};
       if (draftDeeds.length > 0) {
         const toCreate = draftDeeds.map(({ _tempId, ...fields }) => fields);
@@ -103,7 +204,6 @@ export default function Canvas({ workspace }) {
           idMap[d._tempId] = created[i]._id;
         });
       }
-      // 2. Persist pending edges, resolving temp ids to real ids.
       if (pendingEdges.length > 0) {
         const resolved = pendingEdges.map((e) => ({
           sourceDeedId: idMap[e.sourceKey] || e.sourceKey,
@@ -115,7 +215,6 @@ export default function Canvas({ workspace }) {
       }
       setDraftDeeds([]);
       setPendingEdges([]);
-      setConnectMode(false);
       load();
     } catch (e) {
       setError(e.message);
@@ -128,28 +227,14 @@ export default function Canvas({ workspace }) {
 
   return (
     <div className="max-w-6xl mx-auto py-8 px-4">
-      <div className="flex flex-wrap items-center gap-3 mb-6">
+      <div className="flex flex-wrap items-center gap-3 mb-4">
         <h2 className="text-xl font-bold">{workspace.name}</h2>
         <div className="flex-1" />
         <button onClick={addDraftDeed} className="bg-slate-900 text-white px-3 py-1.5 rounded text-sm">
           + Add Deed
         </button>
-        <button
-          onClick={addFiveDraftDeeds}
-          className="border border-slate-900 px-3 py-1.5 rounded text-sm"
-        >
-          + Add 5 Deeds
-        </button>
-        <button
-          onClick={() => {
-            setConnectMode((v) => !v);
-            setConnectFirstPick(null);
-          }}
-          className={`px-3 py-1.5 rounded text-sm ${
-            connectMode ? "bg-blue-600 text-white" : "border border-blue-600 text-blue-600"
-          }`}
-        >
-          {connectMode ? "Exit Connect Mode" : "Connect Deeds"}
+        <button onClick={onView} className="border border-slate-900 px-3 py-1.5 rounded text-sm">
+          View
         </button>
         <a
           href={api.exportWorkspaceUrl(workspace._id)}
@@ -168,15 +253,13 @@ export default function Canvas({ workspace }) {
         )}
       </div>
 
-      {error && <p className="text-red-600 mb-4">{error}</p>}
-      {connectMode && (
-        <p className="text-sm text-blue-700 mb-4">
-          Click a source deed, then click the deed that derives from it. Repeat for as many
-          links as you need, then confirm each below.
-        </p>
-      )}
+      <p className="text-sm text-slate-500 mb-4">
+        Drag from the dot at the bottom of a deed to the dot at the top of another to mark that
+        it derives from it. New deeds and links only take effect once you click Save.
+      </p>
 
-      {/* Edge confirmation prompt */}
+      {error && <p className="text-red-600 mb-4">{error}</p>}
+
       {edgeDraft && (
         <div className="border border-blue-400 bg-blue-50 rounded p-3 mb-4 text-sm">
           <p className="mb-2">
@@ -208,93 +291,138 @@ export default function Canvas({ workspace }) {
         </div>
       )}
 
-      {/* Pending (unsaved) edges list */}
-      {pendingEdges.length > 0 && (
-        <div className="mb-4 text-sm">
-          <p className="font-semibold mb-1">Pending links (not saved yet)</p>
-          <ul className="space-y-1">
-            {pendingEdges.map((e, i) => (
-              <li key={i} className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded px-2 py-1">
-                <span>
-                  {labelForKey(e.targetKey)} ← derives from ← {labelForKey(e.sourceKey)}
-                  {e.areaTransferred ? ` (${e.areaTransferred})` : ""}
-                </span>
-                <button
-                  className="text-red-600 text-xs ml-auto"
-                  onClick={() => setPendingEdges((prev) => prev.filter((_, idx) => idx !== i))}
-                >
-                  Remove
-                </button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* Deed cards */}
-      <div className="flex flex-wrap gap-4 mb-8">
-        {savedDeeds.map((deed) => (
-          <DeedCard
-            key={deed._id}
-            deed={deed}
-            isDraft={false}
-            connectMode={connectMode}
-            isSelectedForConnect={connectFirstPick === deed._id}
-            onSave={async (next) => {
-              const { _id, __v, createdAt, updatedAt, workspaceId, ...fields } = next;
-              await api.updateDeed(workspace._id, deed._id, fields);
-              load();
-            }}
-            onDelete={() => deleteSavedDeed(deed._id)}
-            onSelectForConnect={handleSelectForConnect}
-          />
-        ))}
-        {draftDeeds.map((deed) => (
-          <DeedCard
-            key={deed._tempId}
-            deed={deed}
-            isDraft
-            connectMode={connectMode}
-            isSelectedForConnect={connectFirstPick === deed._tempId}
-            onChange={(next) => updateDraft(deed._tempId, next)}
-            onDelete={() => removeDraft(deed._tempId)}
-            onSelectForConnect={handleSelectForConnect}
-          />
-        ))}
-      </div>
-
-      {savedDeeds.length === 0 && draftDeeds.length === 0 && (
+      {allCards.length === 0 ? (
         <p className="text-slate-500">No deeds yet. Click "Add Deed" to start.</p>
-      )}
+      ) : (
+        <div className="border rounded bg-slate-50 overflow-auto" style={{ maxHeight: "75vh" }}>
+          <div
+            ref={contentRef}
+            style={{ position: "relative", width: Math.max(width, 700), height: Math.max(height, 300) }}
+          >
+            <svg
+              width={Math.max(width, 700)}
+              height={Math.max(height, 300)}
+              style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }}
+            >
+              <defs>
+                <marker id="arrowhead-edit" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                  <path d="M0,0 L8,4 L0,8 Z" fill="#64748b" />
+                </marker>
+              </defs>
 
-      {/* Saved relationships list */}
-      {savedRelationships.length > 0 && (
-        <div>
-          <h3 className="font-semibold mb-2">Saved relationships</h3>
-          <ul className="space-y-1 text-sm">
-            {savedRelationships.map((rel) => {
-              const source = savedDeeds.find((d) => d._id === rel.sourceDeedId);
-              const target = savedDeeds.find((d) => d._id === rel.targetDeedId);
+              {graphEdges.map((e, i) => {
+                const a = anchors.get(e.sourceKey);
+                const b = anchors.get(e.targetKey);
+                if (!a || !b) return null;
+                const x1 = a.bottom.x,
+                  y1 = a.bottom.y;
+                const x2 = b.top.x,
+                  y2 = b.top.y;
+                const midY = (y1 + y2) / 2;
+                return (
+                  <g key={e._id || `pending-${i}`}>
+                    <path
+                      d={`M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`}
+                      fill="none"
+                      stroke={e.saved ? "#64748b" : "#f59e0b"}
+                      strokeWidth="2"
+                      strokeDasharray={e.saved ? undefined : "5,4"}
+                      markerEnd="url(#arrowhead-edit)"
+                      style={{ pointerEvents: "stroke", cursor: "pointer" }}
+                      onClick={() =>
+                        e.saved
+                          ? deleteSavedRelationship(e._id)
+                          : removePendingEdge(e.pendingIndex)
+                      }
+                    />
+                    {e.areaTransferred && (
+                      <text
+                        x={(x1 + x2) / 2}
+                        y={midY - 4}
+                        fontSize="10"
+                        fill="#475569"
+                        textAnchor="middle"
+                        style={{ pointerEvents: "none" }}
+                      >
+                        {e.areaTransferred}
+                      </text>
+                    )}
+                  </g>
+                );
+              })}
+
+              {isDragging &&
+                dragPos &&
+                (() => {
+                  const a = anchors.get(draggingSourceRef.current);
+                  if (!a) return null;
+                  const midY = (a.bottom.y + dragPos.y) / 2;
+                  return (
+                    <path
+                      d={`M ${a.bottom.x} ${a.bottom.y} C ${a.bottom.x} ${midY}, ${dragPos.x} ${midY}, ${dragPos.x} ${dragPos.y}`}
+                      fill="none"
+                      stroke="#2563eb"
+                      strokeWidth="2"
+                      strokeDasharray="4,4"
+                    />
+                  );
+                })()}
+            </svg>
+
+            {allCards.map((deed) => {
+              const key = keyFor(deed);
+              const pos = positions.get(key);
+              const isDraft = !deed._id;
+              if (!pos) return null;
               return (
-                <li
-                  key={rel._id}
-                  className="flex items-center gap-2 bg-white border rounded px-2 py-1"
+                <div
+                  key={key}
+                  ref={(el) => {
+                    if (el) wrapperRefs.current.set(key, el);
+                    else wrapperRefs.current.delete(key);
+                  }}
+                  style={{ position: "absolute", left: pos.x, top: pos.y, width: NODE_W }}
                 >
-                  <span>
-                    {target ? deedLabel(target) : "(deleted)"} ← derives from ←{" "}
-                    {source ? deedLabel(source) : "(deleted)"}
-                    {rel.areaTransferred ? ` (${rel.areaTransferred})` : ""}
-                  </span>
-                  <button
-                    className="text-red-600 text-xs ml-auto"
-                    onClick={() => deleteSavedRelationship(rel._id)}
-                  >
-                    Remove
-                  </button>
-                </li>
+                  <div
+                    ref={(el) => {
+                      if (el) topDotRefs.current.set(key, el);
+                      else topDotRefs.current.delete(key);
+                    }}
+                    title="Derives from (drop a link here)"
+                    className="w-4 h-4 rounded-full bg-slate-400 border-2 border-white shadow mx-auto"
+                    style={{ position: "absolute", top: -8, left: NODE_W / 2 - 8, zIndex: 5 }}
+                  />
+
+                  <DeedCard
+                    deed={deed}
+                    isDraft={isDraft}
+                    onChange={isDraft ? (next) => updateDraft(deed._tempId, next) : undefined}
+                    onSave={
+                      !isDraft
+                        ? async (next) => {
+                            const { _id, __v, createdAt, updatedAt, workspaceId, ...fields } = next;
+                            await api.updateDeed(workspace._id, deed._id, fields);
+                            load();
+                          }
+                        : undefined
+                    }
+                    onDelete={() => (isDraft ? removeDraft(deed._tempId) : deleteSavedDeed(deed._id))}
+                  />
+
+                  <div
+                    ref={(el) => {
+                      if (el) bottomDotRefs.current.set(key, el);
+                      else bottomDotRefs.current.delete(key);
+                    }}
+                    onMouseDown={startDrag(key)}
+                    title="Drag to link this deed to one derived from it"
+                    className="w-4 h-4 rounded-full bg-blue-500 border-2 border-white shadow mx-auto cursor-grab active:cursor-grabbing"
+                    style={{ position: "absolute", bottom: -8, left: NODE_W / 2 - 8, zIndex: 5 }}
+                  />
+                </div>
               );
             })}
-          </ul>
+          </div>
         </div>
       )}
     </div>

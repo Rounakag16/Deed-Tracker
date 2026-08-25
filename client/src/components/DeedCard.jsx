@@ -4,12 +4,9 @@ import DeedForm from "./DeedForm";
 export default function DeedCard({
   deed,
   isDraft,
-  isSelectedForConnect,
-  connectMode,
   onChange, // used for drafts: fires on every keystroke, kept in memory only (cheap)
   onSave, // used for saved deeds: only called when the user clicks Save
   onDelete,
-  onSelectForConnect,
 }) {
   const [expanded, setExpanded] = useState(isDraft);
 
@@ -55,12 +52,7 @@ export default function DeedCard({
   const buyer = displayDeed.purchasers?.[0]?.name;
 
   return (
-    <div
-      className={`w-80 border rounded-lg bg-white shadow-sm p-3 ${
-        isSelectedForConnect ? "ring-2 ring-blue-500" : ""
-      } ${connectMode ? "cursor-pointer" : ""}`}
-      onClick={connectMode ? () => onSelectForConnect(deed) : undefined}
-    >
+    <div className="w-80 border rounded-lg bg-white shadow-sm p-3">
       <div className="flex items-start justify-between">
         <div>
           <p className="font-semibold">
@@ -68,31 +60,29 @@ export default function DeedCard({
           </p>
           {buyer && <p className="text-xs text-slate-500">Buyer: {buyer}</p>}
         </div>
-        {!connectMode && (
-          <div className="flex gap-2">
-            <button
-              className="text-xs text-blue-600 hover:underline"
-              onClick={(e) => {
-                e.stopPropagation();
-                setExpanded((v) => !v);
-              }}
-            >
-              {expanded ? "Collapse" : "Edit"}
-            </button>
-            <button
-              className="text-xs text-red-600 hover:underline"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete();
-              }}
-            >
-              Delete
-            </button>
-          </div>
-        )}
+        <div className="flex gap-2">
+          <button
+            className="text-xs text-blue-600 hover:underline"
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpanded((v) => !v);
+            }}
+          >
+            {expanded ? "Collapse" : "Edit"}
+          </button>
+          <button
+            className="text-xs text-red-600 hover:underline"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+          >
+            Delete
+          </button>
+        </div>
       </div>
 
-      {expanded && !connectMode && (
+      {expanded && (
         <div className="mt-3 border-t pt-3">
           <DeedForm deed={displayDeed} onChange={handleFormChange} />
           {!isDraft && dirty && (

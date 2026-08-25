@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
+import { computeLayers, computePositions } from "../layout";
 
 function deedLabel(deed) {
   const num = deed.deedInfo?.deedNumber || "(no deed no.)";
@@ -7,36 +8,13 @@ function deedLabel(deed) {
   return buyer ? `${num} - ${buyer}` : num;
 }
 
-const NODE_W = 170;
-const NODE_H = 56;
-const COL_GAP = 90;
-const ROW_GAP = 24;
+const NODE_W = 190;
+const NODE_H = 60;
+const COL_GAP = 40;
+const ROW_GAP = 70;
 const PADDING = 30;
 
-// Longest-path layering: a node's layer is 1 + the deepest of its parents'
-// layers, so converging deeds (multiple sources) always sit to the right of
-// every one of their sources, and diverging deeds (multiple children) each
-// get their own downstream layer.
-function computeLayers(deedIds, parentsOf) {
-  const layer = new Map();
-  const visiting = new Set();
-
-  function layerOf(id) {
-    if (layer.has(id)) return layer.get(id);
-    if (visiting.has(id)) return 0; // cycle guard - shouldn't happen, but don't hang
-    visiting.add(id);
-    const parents = parentsOf.get(id) || [];
-    const l = parents.length === 0 ? 0 : 1 + Math.max(...parents.map(layerOf));
-    visiting.delete(id);
-    layer.set(id, l);
-    return l;
-  }
-
-  deedIds.forEach(layerOf);
-  return layer;
-}
-
-export default function LineageGraph({ workspace }) {
+export default function LineageGraph({ workspace, onBack }) {
   const [deeds, setDeeds] = useState([]);
   const [relationships, setRelationships] = useState([]);
   const [hoveredId, setHoveredId] = useState(null);
@@ -49,38 +27,20 @@ export default function LineageGraph({ workspace }) {
 
   const { positions, edges, width, height } = useMemo(() => {
     const deedIds = deeds.map((d) => d._id);
-    const parentsOf = new Map();
-    const childrenOf = new Map();
-    relationships.forEach((r) => {
-      const s = String(r.sourceDeedId);
-      const t = String(r.targetDeedId);
-      if (!parentsOf.has(t)) parentsOf.set(t, []);
-      parentsOf.get(t).push(s);
-      if (!childrenOf.has(s)) childrenOf.set(s, []);
-      childrenOf.get(s).push(t);
+    const graphEdges = relationships.map((r) => ({
+      sourceKey: String(r.sourceDeedId),
+      targetKey: String(r.targetDeedId),
+    }));
+
+    const layerById = computeLayers(deedIds, graphEdges);
+    const { positions, width, height } = computePositions(deedIds, layerById, {
+      nodeW: NODE_W,
+      nodeH: NODE_H,
+      colGap: COL_GAP,
+      rowGap: ROW_GAP,
+      padding: PADDING,
+      direction: "vertical",
     });
-
-    const layerById = computeLayers(deedIds, parentsOf);
-
-    const byLayer = new Map();
-    deedIds.forEach((id) => {
-      const l = layerById.get(id) ?? 0;
-      if (!byLayer.has(l)) byLayer.set(l, []);
-      byLayer.get(l).push(id);
-    });
-
-    const positions = new Map();
-    byLayer.forEach((ids, l) => {
-      ids.forEach((id, i) => {
-        positions.set(id, {
-          x: PADDING + l * (NODE_W + COL_GAP),
-          y: PADDING + i * (NODE_H + ROW_GAP),
-        });
-      });
-    });
-
-    const maxLayer = Math.max(0, ...[...byLayer.keys()]);
-    const maxRows = Math.max(1, ...[...byLayer.values()].map((v) => v.length));
 
     const edges = relationships
       .map((r) => {
@@ -91,12 +51,7 @@ export default function LineageGraph({ workspace }) {
       })
       .filter(Boolean);
 
-    return {
-      positions,
-      edges,
-      width: PADDING * 2 + (maxLayer + 1) * NODE_W + maxLayer * COL_GAP,
-      height: PADDING * 2 + maxRows * NODE_H + (maxRows - 1) * ROW_GAP,
-    };
+    return { positions, edges, width, height };
   }, [deeds, relationships]);
 
   const deedById = useMemo(() => new Map(deeds.map((d) => [d._id, d])), [deeds]);
@@ -119,7 +74,14 @@ export default function LineageGraph({ workspace }) {
 
   return (
     <div className="max-w-6xl mx-auto py-8 px-4">
-      <h2 className="text-lg font-semibold mb-1">{workspace.name} — Lineage</h2>
+      <div className="flex items-center justify-between mb-1">
+        <h2 className="text-lg font-semibold">{workspace.name} — Lineage</h2>
+        {onBack && (
+          <button onClick={onBack} className="text-sm text-blue-600 hover:underline">
+            ← Back to editing
+          </button>
+        )}
+      </div>
       <p className="text-sm text-slate-500 mb-4">
         Arrows point from a source deed to the deed(s) derived from it. A deed with several
         incoming arrows converged from multiple sources; several outgoing arrows means it
@@ -142,24 +104,24 @@ export default function LineageGraph({ workspace }) {
           </defs>
 
           {edges.map((e, i) => {
-            const x1 = e.from.x + NODE_W;
-            const y1 = e.from.y + NODE_H / 2;
-            const x2 = e.to.x;
-            const y2 = e.to.y + NODE_H / 2;
-            const midX = (x1 + x2) / 2;
+            const x1 = e.from.x + NODE_W / 2;
+            const y1 = e.from.y + NODE_H;
+            const x2 = e.to.x + NODE_W / 2;
+            const y2 = e.to.y;
+            const midY = (y1 + y2) / 2;
             const dimmed =
               hoveredId && String(e.sourceDeedId) !== hoveredId && String(e.targetDeedId) !== hoveredId;
             return (
               <g key={e._id || i} opacity={dimmed ? 0.25 : 1}>
                 <path
-                  d={`M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`}
+                  d={`M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`}
                   fill="none"
                   stroke="#64748b"
                   strokeWidth="1.5"
                   markerEnd="url(#arrowhead)"
                 />
                 {e.areaTransferred && (
-                  <text x={midX} y={(y1 + y2) / 2 - 4} fontSize="10" fill="#475569" textAnchor="middle">
+                  <text x={(x1 + x2) / 2} y={midY - 4} fontSize="10" fill="#475569" textAnchor="middle">
                     {e.areaTransferred}
                   </text>
                 )}
