@@ -1,16 +1,62 @@
-# React + Vite
+# DeedTracker (MERN)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Track the lineage of land deeds as a graph: deeds can converge (multiple source
+deeds combine into one) or diverge (one deed splits into several later deeds),
+grouped into per-area **workspaces**.
 
-Currently, two official plugins are available:
+## Structure
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+```
+server/   Express + MongoDB (Mongoose) API
+client/   React + Vite + Tailwind frontend
+```
 
-## React Compiler
+## Setup
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### 1. MongoDB
+Use a local MongoDB instance or a free MongoDB Atlas cluster. You just need a
+connection string.
 
-## Expanding the ESLint configuration
+### 2. Server
+```bash
+cd server
+cp .env.example .env   # fill in MONGODB_URI
+npm install
+npm run dev
+```
+Runs on http://localhost:4000
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+### 3. Client
+```bash
+cd client
+npm install
+npm run dev
+```
+Runs on http://localhost:5173, proxies /api to the server.
+
+## Data model
+
+- **Workspace** — one dedicated area/land tract. Holds many deeds.
+- **Deed** — same fields as before (purchasers, sellers, deedInfo, landParcels
+  with khatiyas/plots), plus `workspaceId`.
+- **Relationship** — a directed edge `{ workspaceId, sourceDeedId, targetDeedId,
+  areaTransferred, note }` meaning "targetDeed derives from sourceDeed". A deed
+  can be the source or target of any number of edges, which is what lets a
+  deed converge from several parents or diverge into several children.
+  "Siblings" are just deeds that share the same source edge — no separate
+  edge type needed for that.
+
+## Workflow
+
+Everything after this initial scaffold will be delivered to you as a `.diff`
+file. To apply one:
+
+```bash
+git apply the-file-you-got.diff
+git add -A
+git commit -m "describe the change"
+```
+
+If a diff fails to apply cleanly (usually because you've hand-edited a file
+it touches), paste the error back and I'll regenerate it against your current
+version.
