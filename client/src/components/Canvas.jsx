@@ -13,12 +13,16 @@ function deedLabel(deed) {
   return buyer ? `${num} - ${buyer}` : num;
 }
 
-const NODE_W = 320;
+// Must match DeedCard.jsx's card width exactly - see the comment there.
+const NODE_W = 400;
 const NODE_H_ESTIMATE = 110; // only used for layout spacing; actual dot
 // positions are measured from the real DOM so expanded cards don't break it
 const COL_GAP = 60;
 const ROW_GAP = 90;
 const PADDING = 50;
+const MIN_ZOOM = 0.4;
+const MAX_ZOOM = 1.5;
+const ZOOM_STEP = 0.1;
 
 export default function Canvas({ workspace, onView }) {
   const [savedDeeds, setSavedDeeds] = useState([]);
@@ -32,10 +36,14 @@ export default function Canvas({ workspace, onView }) {
   const [liveDragPos, setLiveDragPos] = useState(null); // { key, x, y } while a card is being repositioned
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [zoom, setZoom] = useState(1);
+  const [isPanning, setIsPanning] = useState(false);
 
   const draggingSourceRef = useRef(null);
   const cardDragRef = useRef(null);
+  const panRef = useRef(null);
   const contentRef = useRef(null);
+  const scrollRef = useRef(null);
   const wrapperRefs = useRef(new Map());
   const topDotRefs = useRef(new Map());
   const bottomDotRefs = useRef(new Map());
@@ -201,6 +209,10 @@ export default function Canvas({ workspace, onView }) {
   const startCardDrag = (key, currentPos) => (e) => {
     if (e.target.closest("button, input, textarea, select")) return;
     e.preventDefault();
+    // Stop this mousedown from also reaching the scroll container's
+    // startPan handler below - otherwise dragging a card would also try to
+    // pan the canvas at the same time.
+    e.stopPropagation();
     cardDragRef.current = {
       key,
       startMouseX: e.clientX,
@@ -236,6 +248,45 @@ export default function Canvas({ workspace, onView }) {
       window.removeEventListener("mouseup", handleUp);
     };
   }, [isCardDragging]);
+
+  // Pan: mousedown on empty canvas background (not a card, dot, edge, or
+  // form control) drags the scroll container's scrollLeft/scrollTop, so you
+  // don't have to hunt for the browser's own scrollbars on a large graph.
+  const startPan = (e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest("path, button, input, textarea, select, [data-card-wrapper]")) return;
+    panRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      scrollLeft: scrollRef.current.scrollLeft,
+      scrollTop: scrollRef.current.scrollTop,
+    };
+    setIsPanning(true);
+  };
+
+  useEffect(() => {
+    if (!isPanning) return;
+    const handleMove = (e) => {
+      const p = panRef.current;
+      if (!p || !scrollRef.current) return;
+      scrollRef.current.scrollLeft = p.scrollLeft - (e.clientX - p.startX);
+      scrollRef.current.scrollTop = p.scrollTop - (e.clientY - p.startY);
+    };
+    const handleUp = () => {
+      panRef.current = null;
+      setIsPanning(false);
+    };
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+  }, [isPanning]);
+
+  const zoomIn = () => setZoom((z) => Math.min(MAX_ZOOM, +(z + ZOOM_STEP).toFixed(2)));
+  const zoomOut = () => setZoom((z) => Math.max(MIN_ZOOM, +(z - ZOOM_STEP).toFixed(2)));
+  const zoomReset = () => setZoom(1);
 
   const resetLayout = async () => {
     if (!confirm("Snap every deed back to the auto-arranged layout?")) return;
@@ -311,10 +362,35 @@ export default function Canvas({ workspace, onView }) {
   const hasUnsaved = draftDeeds.length > 0 || pendingEdges.length > 0;
 
   return (
-    <div className="max-w-6xl mx-auto py-8 px-4">
+    <div className="max-w-[1800px] mx-auto py-8 px-4">
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <h2 className="text-xl font-bold">{workspace.name}</h2>
         <div className="flex-1" />
+        <div className="flex items-center border rounded overflow-hidden text-sm">
+          <button
+            onClick={zoomOut}
+            disabled={zoom <= MIN_ZOOM}
+            className="px-2 py-1.5 hover:bg-slate-100 disabled:opacity-40"
+            title="Zoom out"
+          >
+            −
+          </button>
+          <button
+            onClick={zoomReset}
+            className="px-2 py-1.5 border-x hover:bg-slate-100 w-14"
+            title="Reset zoom"
+          >
+            {Math.round(zoom * 100)}%
+          </button>
+          <button
+            onClick={zoomIn}
+            disabled={zoom >= MAX_ZOOM}
+            className="px-2 py-1.5 hover:bg-slate-100 disabled:opacity-40"
+            title="Zoom in"
+          >
+            +
+          </button>
+        </div>
         <button onClick={addDraftDeed} className="bg-slate-900 text-white px-3 py-1.5 rounded text-sm">
           + Add Deed
         </button>
@@ -343,8 +419,9 @@ export default function Canvas({ workspace, onView }) {
 
       <p className="text-sm text-slate-500 mb-4">
         Drag a card to reposition it, or drag from the dot at the bottom of a deed to the dot at
-        the top of another to mark that it derives from it. New deeds and links only take effect
-        once you click Save; a moved card's position saves immediately.
+        the top of another to mark that it derives from it. Drag empty canvas background to pan,
+        and use the zoom controls above to see more of a large workspace at once. New deeds and
+        links only take effect once you click Save; a moved card's position saves immediately.
       </p>
 
       {error && <p className="text-red-600 mb-4">{error}</p>}
@@ -397,16 +474,37 @@ export default function Canvas({ workspace, onView }) {
       {allCards.length === 0 ? (
         <p className="text-slate-500">No deeds yet. Click "Add Deed" to start.</p>
       ) : (
-        <div className="border rounded bg-slate-50 overflow-auto" style={{ maxHeight: "75vh" }}>
+        <div
+          ref={scrollRef}
+          onMouseDown={startPan}
+          className="border rounded bg-slate-50 overflow-auto"
+          style={{ maxHeight: "calc(100vh - 200px)", cursor: isPanning ? "grabbing" : "grab" }}
+        >
+          {/* Outer sizing div matches the *scaled* content dimensions so the
+              scroll container's scrollbars/scroll range are correct at any
+              zoom level; the inner div is the actual unscaled content,
+              transformed down/up to fit. */}
           <div
-            ref={contentRef}
-            style={{ position: "relative", width: Math.max(width, 700), height: Math.max(height, 300) }}
+            style={{
+              width: Math.max(width, 900) * zoom,
+              height: Math.max(height, 400) * zoom,
+            }}
           >
-            <svg
-              width={Math.max(width, 700)}
-              height={Math.max(height, 300)}
-              style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }}
+            <div
+              ref={contentRef}
+              style={{
+                position: "relative",
+                width: Math.max(width, 900),
+                height: Math.max(height, 400),
+                transform: `scale(${zoom})`,
+                transformOrigin: "0 0",
+              }}
             >
+              <svg
+                width={Math.max(width, 900)}
+                height={Math.max(height, 400)}
+                style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }}
+              >
               <defs>
                 <marker id="arrowhead-edit" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
                   <path d="M0,0 L8,4 L0,8 Z" fill="#64748b" />
@@ -481,6 +579,7 @@ export default function Canvas({ workspace, onView }) {
               return (
                 <div
                   key={key}
+                  data-card-wrapper="true"
                   ref={(el) => {
                     if (el) wrapperRefs.current.set(key, el);
                     else wrapperRefs.current.delete(key);
@@ -534,6 +633,7 @@ export default function Canvas({ workspace, onView }) {
                 </div>
               );
             })}
+            </div>
           </div>
         </div>
       )}

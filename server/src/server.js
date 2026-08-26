@@ -22,7 +22,20 @@ app.use("/api/search", searchRouter);
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
 // Generic error handler so a thrown error doesn't crash the process.
+// Mongoose validation/cast errors are the user's fault (bad input), not a
+// server fault - surface those as 400s with a readable message instead of
+// a generic 500.
 app.use((err, req, res, next) => {
+  if (err.name === "ValidationError") {
+    const messages = Object.values(err.errors).map((e) => e.message);
+    return res.status(400).json({ error: messages.join("; ") });
+  }
+  if (err.name === "CastError") {
+    return res.status(400).json({ error: `Invalid ${err.path}: '${err.value}'` });
+  }
+  if (err.code === 11000) {
+    return res.status(409).json({ error: "That already exists (duplicate)" });
+  }
   console.error(err);
   res.status(500).json({ error: err.message || "Internal server error" });
 });

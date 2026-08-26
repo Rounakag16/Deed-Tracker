@@ -52,7 +52,12 @@ export default function DeedCard({
   const buyer = displayDeed.purchasers?.[0]?.name;
 
   return (
-    <div className="w-80 border rounded-lg bg-white shadow-sm p-3">
+    // Width must stay in sync with Canvas.jsx's NODE_W constant - the
+    // wrapper positioning (dot centering, layout math) assumes this card is
+    // exactly that wide. Bumped from 320px (w-80) to 400px so the land
+    // parcel editor's 3-across input rows (RS/LR/Area) have room and don't
+    // visually overflow the card.
+    <div className="w-[400px] border rounded-lg bg-white shadow-sm p-3">
       <div className="flex items-start justify-between">
         <div>
           <p className="font-semibold">

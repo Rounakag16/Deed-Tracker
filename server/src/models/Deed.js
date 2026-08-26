@@ -41,7 +41,15 @@ const landParcelSchema = new mongoose.Schema(
 
 const deedInfoSchema = new mongoose.Schema(
   {
-    deedNumber: { type: String, default: "" },
+    deedNumber: {
+      type: String,
+      required: [true, "Deed number is required"],
+      trim: true,
+      validate: {
+        validator: (v) => v.trim().length > 0,
+        message: "Deed number cannot be blank",
+      },
+    },
     volumeNumber: { type: String, default: "" },
     pageNumber: { type: String, default: "" },
     officeNumber: { type: String, default: "" },

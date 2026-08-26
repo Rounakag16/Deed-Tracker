@@ -1,8 +1,12 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 
+const PAGE_SIZE = 20;
+
 export default function WorkspaceList({ onOpen }) {
   const [workspaces, setWorkspaces] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [name, setName] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -12,13 +16,17 @@ export default function WorkspaceList({ onOpen }) {
   const load = () => {
     setLoading(true);
     api
-      .listWorkspaces()
-      .then(setWorkspaces)
+      .listWorkspaces(page, PAGE_SIZE)
+      .then((res) => {
+        setWorkspaces(res.workspaces);
+        setTotal(res.total);
+      })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   };
 
-  useEffect(load, []);
+  useEffect(load, [page]);
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -26,7 +34,9 @@ export default function WorkspaceList({ onOpen }) {
     try {
       await api.createWorkspace(name.trim());
       setName("");
-      load();
+      // Newest-first sort means a new workspace always lands on page 1.
+      if (page !== 1) setPage(1);
+      else load();
     } catch (e) {
       setError(e.message);
     }
@@ -35,7 +45,10 @@ export default function WorkspaceList({ onOpen }) {
   const handleDelete = async (id) => {
     if (!confirm("Delete this workspace and every deed/relationship in it?")) return;
     await api.deleteWorkspace(id);
-    load();
+    // If that was the last workspace on this page (and not page 1), step back
+    // a page instead of showing an empty page.
+    if (workspaces.length === 1 && page > 1) setPage((p) => p - 1);
+    else load();
   };
 
   const startRename = (w) => {
@@ -132,6 +145,28 @@ export default function WorkspaceList({ onOpen }) {
             </li>
           ))}
         </ul>
+      )}
+
+      {!loading && total > PAGE_SIZE && (
+        <div className="flex items-center justify-between mt-4 text-sm">
+          <button
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page <= 1}
+            className="px-3 py-1 border rounded disabled:opacity-40"
+          >
+            ← Prev
+          </button>
+          <span className="text-slate-500">
+            Page {page} of {totalPages} ({total} workspace{total === 1 ? "" : "s"})
+          </span>
+          <button
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={page >= totalPages}
+            className="px-3 py-1 border rounded disabled:opacity-40"
+          >
+            Next →
+          </button>
+        </div>
       )}
     </div>
   );

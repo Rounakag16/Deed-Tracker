@@ -22,24 +22,37 @@ function deedLabel(deed) {
   return buyer ? `${num} - ${buyer}` : num;
 }
 
+const PAGE_SIZE = 25;
+
 export default function SearchPanel({ workspace, onlyThisWorkspace = true, onSelectDeed }) {
   const [q, setQ] = useState("");
   const [topic, setTopic] = useState("all");
   const [scopeWorkspace, setScopeWorkspace] = useState(onlyThisWorkspace);
   const [results, setResults] = useState(null);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
 
-  const runSearch = async (e) => {
-    e.preventDefault();
+  const runSearch = async (e, targetPage = 1) => {
+    if (e) e.preventDefault();
     if (!q.trim()) return;
     setLoading(true);
     try {
-      const res = await api.search(q.trim(), topic, scopeWorkspace ? workspace._id : undefined);
-      setResults(res);
+      const res = await api.search(
+        q.trim(),
+        topic,
+        scopeWorkspace ? workspace._id : undefined,
+        targetPage,
+        PAGE_SIZE
+      );
+      setResults(res.results);
+      setTotal(res.total);
+      setPage(res.page);
     } finally {
       setLoading(false);
     }
   };
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <div className="max-w-3xl mx-auto py-8 px-4">
@@ -95,6 +108,28 @@ export default function SearchPanel({ workspace, onlyThisWorkspace = true, onSel
             </li>
           ))}
         </ul>
+      )}
+
+      {results && total > PAGE_SIZE && (
+        <div className="flex items-center justify-between mt-4 text-sm">
+          <button
+            onClick={() => runSearch(null, page - 1)}
+            disabled={page <= 1 || loading}
+            className="px-3 py-1 border rounded disabled:opacity-40"
+          >
+            ← Prev
+          </button>
+          <span className="text-slate-500">
+            Page {page} of {totalPages} ({total} match{total === 1 ? "" : "es"})
+          </span>
+          <button
+            onClick={() => runSearch(null, page + 1)}
+            disabled={page >= totalPages || loading}
+            className="px-3 py-1 border rounded disabled:opacity-40"
+          >
+            Next →
+          </button>
+        </div>
       )}
     </div>
   );

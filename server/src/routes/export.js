@@ -3,6 +3,7 @@ const ExcelJS = require("exceljs");
 const Deed = require("../models/Deed");
 const Relationship = require("../models/Relationship");
 const Workspace = require("../models/Workspace");
+const asyncHandler = require("../utils/asyncHandler");
 
 const router = express.Router({ mergeParams: true });
 
@@ -32,8 +33,10 @@ function findRootAncestors(deedId, parentsByDeed, cache = new Map()) {
 }
 
 // GET /api/workspaces/:workspaceId/export
-router.get("/", async (req, res) => {
-  const { workspaceId } = req.params;
+router.get(
+  "/",
+  asyncHandler(async (req, res) => {
+    const { workspaceId } = req.params;
   const workspace = await Workspace.findById(workspaceId);
   if (!workspace) return res.status(404).json({ error: "Workspace not found" });
 
@@ -133,8 +136,9 @@ router.get("/", async (req, res) => {
   );
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
 
-  await workbook.xlsx.write(res);
-  res.end();
-});
+    await workbook.xlsx.write(res);
+    res.end();
+  })
+);
 
 module.exports = router;

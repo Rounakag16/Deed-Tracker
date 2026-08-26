@@ -115,8 +115,13 @@ before touching `Canvas.jsx`:
 │   ├── .env.example            MONGODB_URI, PORT
 │   ├── package.json
 │   └── src/
-│       ├── server.js           Express app entrypoint; mounts all routers
+│       ├── server.js           Express app entrypoint; mounts all routers,
+│       │                        generic error handler (Mongoose
+│       │                        ValidationError/CastError -> clean 400s)
 │       ├── utils/db.js         Mongoose connection helper
+│       ├── utils/asyncHandler.js  Wraps async route handlers so a
+│       │                        rejected promise reaches the error
+│       │                        handler instead of hanging the request
 │       ├── models/
 │       │   ├── Workspace.js    { name, description }
 │       │   ├── Deed.js         Full deed schema (see Database section)
@@ -191,13 +196,15 @@ One workspace = one land tract/area a user is tracking. No further nesting.
 This schema is a direct carry-over from the original (pre-rewrite) app's
 field names - do not rename these fields without checking `DeedForm.jsx`,
 `export.js`, and `search.js`, all of which reference them by exact path.
+`deedInfo.deedNumber` is required (server-side validation, non-blank).
 
 A **text index** covers all the searchable string fields (purchaser/seller
 names, deed/volume/page/office numbers, mouja, sheet no., khatiya no., plot
-RS/LR) - see bottom of `Deed.js`. In practice `search.js` currently does
-**regex** matching per topic rather than using MongoDB's `$text` operator
-(see Known Issues), so this text index is currently unused by application
-code.
+RS/LR) - see bottom of `Deed.js`. `search.js` uses MongoDB's `$text`
+operator against this index for `topic=all` (sorted by relevance score);
+a scoped single-field topic (e.g. `deedNo`) uses regex instead, since
+`$text` can't be restricted to one field of a compound text index at
+query time.
 
 ### `relationships`
 ```
@@ -213,9 +220,9 @@ code.
 ```
 Directed edge meaning "targetDeed derives from sourceDeed". A unique
 compound index on `(workspaceId, sourceDeedId, targetDeedId)` prevents
-duplicate edges in the same direction between the same pair (but does
-**not** prevent a reverse edge, and does not prevent cycles - see Known
-Issues).
+duplicate edges in the same direction between the same pair. Reverse edges
+and multi-hop cycles (A→B→C→A) are rejected server-side (BFS check against
+existing + same-batch edges in `relationships.js` - see Major Features).
 
 **Relationships:** Deed → Workspace (many-to-one). Relationship → Workspace
 (many-to-one), Relationship → Deed × 2 (many-to-one each, as source and
@@ -230,23 +237,23 @@ No authentication on any route (see Authentication section).
 
 | Method | Route | Purpose |
 |---|---|---|
-| GET | `/workspaces` | List all workspaces |
+| GET | `/workspaces?page=&limit=` | List workspaces, paginated. Returns `{ workspaces, total, page, limit }` (default `limit=20`, max 100) |
 | GET | `/workspaces/:id` | Get one workspace |
 | POST | `/workspaces` | Create workspace `{ name, description }` |
 | PATCH | `/workspaces/:id` | Rename/update description |
 | DELETE | `/workspaces/:id` | Delete workspace + cascade its deeds/relationships |
-| GET | `/workspaces/:workspaceId/deeds` | List deeds in a workspace |
-| POST | `/workspaces/:workspaceId/deeds` | Create one or many deeds - body `{ deeds: [...] }` (or a single deed object as fallback) |
+| GET | `/workspaces/:workspaceId/deeds` | List deeds in a workspace. Returns a bare array, unpaginated - see Known Issues for why |
+| POST | `/workspaces/:workspaceId/deeds` | Create one or many deeds - body `{ deeds: [...] }` (or a single deed object as fallback). 400 on missing/blank deed number |
 | PUT | `/workspaces/:workspaceId/deeds/:deedId` | Update a deed (partial `$set` of whatever fields are sent, including `position`) |
 | DELETE | `/workspaces/:workspaceId/deeds/:deedId` | Delete a deed + cascade its relationships |
 | GET | `/workspaces/:workspaceId/relationships` | List edges in a workspace |
-| POST | `/workspaces/:workspaceId/relationships` | Create one or many edges - body `{ relationships: [...] }`. Rejects any edge where `sourceDeedId === targetDeedId`. Duplicate edges are silently skipped (207 response) rather than erroring the whole batch. |
+| POST | `/workspaces/:workspaceId/relationships` | Create one or many edges - body `{ relationships: [...] }`. Rejects any edge that is a self-loop or would close a multi-hop cycle (400, all-or-nothing). Duplicate edges are silently skipped (207 response) |
 | DELETE | `/workspaces/:workspaceId/relationships/:relationshipId` | Delete one edge |
-| GET | `/search?q=&topic=&workspaceId=` | Search deeds. `topic` is one of `all, purchaser, seller, deedNo, volumeNo, pageNo, officeNo, mouja, sheetNo, khatiyaNo, plotNoRS, plotNoLR` (see `TOPIC_FIELDS` map in `search.js`). `workspaceId` is optional - omit to search across all workspaces. Returns each match with its immediate parent/child deed ids attached for context. |
+| GET | `/search?q=&topic=&workspaceId=&page=&limit=` | Search deeds, paginated. `topic` is one of `all, purchaser, seller, deedNo, volumeNo, pageNo, officeNo, mouja, sheetNo, khatiyaNo, plotNoRS, plotNoLR`. `workspaceId` is optional - omit to search across all workspaces. Returns `{ results, total, page, limit }`; each result has its immediate parent/child deed ids attached for context |
 | GET | `/workspaces/:workspaceId/export` | Streams an `.xlsx` file: "Deeds" sheet (flattened fields + computed root-ancestor column) and "Relationships" sheet (source/target/area/note) |
 
-No route currently supports partial/paginated results - `search` caps at
-200 results, everything else returns full collections unpaginated.
+Pagination is on `/workspaces` and `/search` only. The per-workspace deed
+list stays unpaginated on purpose - see Known Issues.
 
 ## Authentication & Authorization
 
@@ -269,8 +276,16 @@ client will need a login flow added ahead of `WorkspaceList.jsx`.
   - Cards are freely draggable to reposition; position persists per-deed
     immediately on drop. "Reset Layout" clears all manual positions back to
     auto-arrange.
+  - Pan (drag empty background) and zoom (40%-150%, toolbar +/-/reset)
+    on the canvas viewport, which itself is wider (max-w-1800px,
+    viewport-relative max height) than the rest of the app's content.
+  - Cards are 400px wide (`NODE_W` in `Canvas.jsx`, kept in sync with
+    `DeedCard.jsx`'s width class) - wide enough that the land parcel
+    editor's 3-across RS/LR/Area row doesn't crowd/overflow.
   - New deeds/links are drafts until "Save" is clicked (batch-commits
-    drafts then links, resolving temp ids to real ones).
+    drafts then links, resolving temp ids to real ones). A save is
+    rejected server-side (and the error shown inline) if any deed is
+    missing a deed number, or any link would close a cycle.
   - Already-saved deeds can be expanded and edited inline; edits are
     buffered locally and only PUT to the server on an explicit "Save
     changes" click (see Known Issues / Important Implementation Details for
@@ -282,9 +297,9 @@ client will need a login flow added ahead of `WorkspaceList.jsx`.
   workspace. Clicking a node opens a side panel with full deed detail plus
   clickable lists of its parent/child deeds, letting you walk the chain.
 - **Search** (`SearchPanel.jsx`) - field-scoped or all-fields search, can
-  be scoped to the current workspace or global. Clicking a result jumps
-  straight into the Lineage view for that deed, switching workspaces first
-  if the result belongs to a different one.
+  be scoped to the current workspace or global, paginated (Prev/Next).
+  Clicking a result jumps straight into the Lineage view for that deed,
+  switching workspaces first if the result belongs to a different one.
 - **Excel export** - per-workspace two-sheet `.xlsx` (Deeds, Relationships)
   including a computed "root ancestor deed(s)" column per deed.
 
@@ -365,28 +380,30 @@ client will need a login flow added ahead of `WorkspaceList.jsx`.
 ## Current Project Status
 
 **Completed:**
-- Workspace CRUD (create/list/rename/delete)
-- Deed CRUD, full field parity with the original app's schema
-- Relationship CRUD (directed edges, converge/diverge support)
+- Workspace CRUD (create/list/rename/delete), paginated list
+- Deed CRUD, full field parity with the original app's schema, required-field
+  validation (deed number)
+- Relationship CRUD (directed edges, converge/diverge support), multi-hop
+  cycle prevention
 - Node-editor canvas: add deed, drag-to-wire, drag-to-reposition, batch
-  save, duplicate deed-number warning
+  save, duplicate deed-number warning, pan (drag background) + zoom
+  (40%-150%), wider default viewport
 - Read-only Lineage/View mode with click-to-inspect panel
-- Field-scoped + cross-workspace search, with click-through navigation
+- Field-scoped + cross-workspace search (uses the Mongo text index for
+  "all fields" search; regex for a single scoped field), paginated,
+  with click-through navigation
 - Two-sheet Excel export with root-ancestor tracing
+- Consistent error handling: async route errors are caught and Mongoose
+  validation/cast errors surface as clean 400s instead of hanging or 500ing
 
 **Partially completed:**
-- Search uses regex matching, not the Mongo text index that's actually
-  defined on the schema (functionally fine at small scale, just an unused
-  index and no relevance ranking)
-- No automated tests exist anywhere in the repo (manual testing only, and
-  as of the last conversation turn the user had not yet run the app
+- No automated tests exist anywhere in the repo (manual/static review only,
+  and as of the last conversation turn the user had not yet run the app
   end-to-end against a live MongoDB instance)
 
 **Not implemented:**
 - Authentication/authorization (explicitly deferred, see Important
   Decisions)
-- Pan/zoom on the canvas (you get browser scroll within a max-height
-  container, not a true zoomable/pannable viewport)
 - Any deployment/hosting configuration (no Dockerfile, no CI, no
   production build/serve setup beyond `vite build`)
 - Bulk import (e.g. migrating data out of the old Firebase version)
@@ -394,29 +411,19 @@ client will need a login flow added ahead of `WorkspaceList.jsx`.
 
 ## Known Issues
 
-- **Cycle prevention is incomplete.** The API only rejects a direct
-  self-loop (`sourceDeedId === targetDeedId`); it does not check for
-  multi-hop cycles (A→B→C→A). The auto-layout algorithm has a guard that
-  prevents infinite recursion if a cycle exists (falls back to layer 0),
-  but a cycle would still be semantically nonsensical data. Uncertain
-  whether this can happen in practice given the UI only lets you link
-  existing/draft cards you can see, but it's not structurally prevented.
-- **Search doesn't use the Mongo text index** defined on `Deed.js` -
-  `search.js` does per-field regex `$or` matching instead. Fine at small
-  data volumes; would need revisiting for relevance ranking or larger
-  datasets.
 - **Expanded (mid-edit) cards can visually overlap the card below them**
   in the same auto-layout column, because layout spacing is based on an
   estimated fixed node height while actual expanded height is much larger.
   Collapsing the card fixes it. Known and accepted trade-off, not yet
   fixed.
-- **No server-side validation** beyond Mongoose schema types/defaults - no
-  required-field enforcement (e.g. a deed can be saved with an empty deed
-  number), no format validation on area/plot fields (all free-text
-  strings).
-- **No pagination anywhere** - `search` caps at 200 results; deed lists,
-  workspace lists, and relationship lists are unbounded. Would need
-  addressing before this scales to a large number of deeds per workspace.
+- **Server-side validation covers deed number only** (required + non-blank).
+  Other fields (area/plot numbers, etc.) remain free-text with no format
+  validation - by design for now, since the domain data (khatiya/plot
+  numbers, areas) doesn't have a single canonical format worth enforcing.
+- **The deed-list endpoint (`GET /workspaces/:id/deeds`) is deliberately
+  unpaginated** - the canvas/lineage view needs the complete graph to lay
+  out correctly, so paginating it would silently hide deeds. Workspace list
+  and search are paginated; this one is a conscious exception, not a gap.
 - **The app has not yet been run end-to-end against a live database** as
   of the last development session - all review so far has been static
   (syntax checks, manual code tracing, balance checks), not live testing.
