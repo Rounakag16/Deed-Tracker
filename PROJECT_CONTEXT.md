@@ -278,7 +278,11 @@ client will need a login flow added ahead of `WorkspaceList.jsx`.
     auto-arrange.
   - Pan (drag empty background) and zoom (40%-150%, toolbar +/-/reset)
     on the canvas viewport, which itself is wider (max-w-1800px,
-    viewport-relative max height) than the rest of the app's content.
+    viewport-relative max height) than the rest of the app's content. The
+    viewport's content box now also grows to cover any manually-dragged
+    card position, not just the auto-layout's own footprint - a mismatch
+    there was the cause of a real crash caught in the first live test
+    (see Known Issues).
   - Cards are 400px wide (`NODE_W` in `Canvas.jsx`, kept in sync with
     `DeedCard.jsx`'s width class) - wide enough that the land parcel
     editor's 3-across RS/LR/Area row doesn't crowd/overflow.
@@ -415,7 +419,8 @@ client will need a login flow added ahead of `WorkspaceList.jsx`.
   in the same auto-layout column, because layout spacing is based on an
   estimated fixed node height while actual expanded height is much larger.
   Collapsing the card fixes it. Known and accepted trade-off, not yet
-  fixed.
+  fixed. Related but distinct from the boundary-overflow crash below -
+  that one is fixed, this visual-overlap one is still open.
 - **Server-side validation covers deed number only** (required + non-blank).
   Other fields (area/plot numbers, etc.) remain free-text with no format
   validation - by design for now, since the domain data (khatiya/plot
@@ -424,11 +429,21 @@ client will need a login flow added ahead of `WorkspaceList.jsx`.
   unpaginated** - the canvas/lineage view needs the complete graph to lay
   out correctly, so paginating it would silently hide deeds. Workspace list
   and search are paginated; this one is a conscious exception, not a gap.
-- **The app has not yet been run end-to-end against a live database** as
-  of the last development session - all review so far has been static
-  (syntax checks, manual code tracing, balance checks), not live testing.
-  Treat as "should work" rather than "confirmed working" until the user
-  reports back.
+- **[FIXED] Canvas could crash with "Maximum update depth exceeded"**
+  when a card was positioned near/past the auto-layout's assumed canvas
+  boundary. The content box's size only accounted for auto-arranged
+  positions, not manually-dragged ones, so an overflowing card combined
+  with an unguarded anchor-remeasurement effect could cascade into a
+  render loop. Fixed by growing the content box to cover every card's
+  actual position (including live drag) and equality-guarding the anchor
+  state update. Found during the project's first live test; fix has not
+  yet been re-confirmed live as of this writing.
+- **The app has had exactly one live end-to-end test so far**, which
+  connected to MongoDB successfully but hit the canvas crash above before
+  the rest of the feature set (relationships, save/reload, search, export,
+  etc.) could be exercised. Treat everything past "create a workspace, add
+  a deed" as still "should work" rather than "confirmed working" until a
+  full pass completes.
 
 ## Development Conventions
 

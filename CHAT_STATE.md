@@ -7,10 +7,12 @@ codebase access** (not the diff-only chat-tier workflow this file was
 written under) and asked whether the full original project scope was
 built. Answer: yes, functionally - see `PROJECT_CONTEXT.md`'s "Current
 Project Status". They then asked to fix the outstanding hardening items
-*before* the first live end-to-end test, and to keep both docs updated
-alongside each change (this turn). That hardening pass is what diff `0009`
-below delivers. **The app has still never been run against a live
-database** - that remains the actual next objective once 0009 is applied.
+*before* the first live end-to-end test - that was diff `0009`, **confirmed
+applied**, and the user did the first-ever live run against a real
+MongoDB: server connected fine, but the canvas crashed with a React
+"Maximum update depth exceeded" error when a card was positioned near the
+canvas boundary. Diff `0010` below fixes that. Live testing is still
+in progress - this is the first real bug found, not the only one expected.
 
 ## Work Completed In This Chat
 
@@ -69,14 +71,28 @@ for exact repo mapping):
      pan-by-dragging the background, zoom controls (40%-150%), and cards
      widened 320px->400px (`NODE_W`, kept in sync with `DeedCard.jsx`) to
      fix the land-parcel RS/LR/Area row overflowing the card.
+10. **Live-testing bug fix (diff 0010)**: first live run (real MongoDB)
+    surfaced a React "Maximum update depth exceeded" crash on `Canvas.jsx`
+    when a card sat near/past the canvas's assumed boundary. Root cause:
+    the auto-layout math that sizes the canvas's content box only knows
+    about auto-arranged card positions, not manually-dragged ones - a
+    dragged card past that assumed boundary overflowed the stated content
+    box, and the anchor-measurement effect had no guard against
+    re-triggering on essentially-unchanged geometry, so the two could
+    cascade. Fixed by (a) growing the content box to also cover every
+    card's actual `position` (including the live position of a card
+    currently mid-drag), and (b) adding an equality check before
+    `setAnchors` so a measurement that didn't actually change never
+    triggers a re-render.
 
 ## Files Changed
 
-Cumulative, across diffs `0001`-`0009` (`0001`-`0007` confirmed applied by
-the user to `github.com/Rounakag16/Deed-Tracker`, `main` branch; `0008`
-and `0009` were generated in a later chat from an uploaded zip of the
-repo - **confirm with the user that both have actually been applied**
-before assuming their repo matches this file):
+Cumulative, across diffs `0001`-`0010` (`0001`-`0009` confirmed applied by
+the user to `github.com/Rounakag16/Deed-Tracker`, `main` branch, including
+a successful `npm install` + live MongoDB connection on both `0001`-`0009`;
+`0010` was generated in response to the bug that live test surfaced -
+**confirm with the user it's been applied** before assuming their repo
+matches this file):
 
 - `server/src/models/Deed.js` - full deed schema; `position` field added
   in diff 0006; `deedInfo.deedNumber` made required+non-blank in 0009.
@@ -112,8 +128,11 @@ before assuming their repo matches this file):
   drag-to-reposition + Reset Layout), diff 0007 (duplicate deed-number
   banner). Diff 0009 added pan/zoom, widened the viewport and `NODE_W`
   (320->400), and added `data-card-wrapper`/`stopPropagation` so card-drag
-  and background-pan don't fight each other. Still the largest/most
-  complex file in the project.
+  and background-pan don't fight each other. Diff 0010 (bug fix): content
+  box now grows to cover manually-positioned/mid-drag cards, and
+  `setAnchors` is equality-guarded to stop a measure/render feedback loop
+  - see Work Completed #10. Still the largest/most complex file in the
+  project.
 - `client/src/components/DeedCard.jsx` - edit-buffering fix in diff 0002;
   simplified in diff 0005 to drop the old click-to-select connect-mode
   props; width bumped 320px->400px (`w-[400px]`) in diff 0009 to match
@@ -132,32 +151,57 @@ before assuming their repo matches this file):
   was enough to fix the overflow, no internal layout change needed.)
 - `PROJECT_CONTEXT.md` - created diff 0008; Current Project Status, Known
   Issues, Repository Structure, Database, API, and Major Features sections
-  updated in 0009 to match the hardening pass.
+  updated in 0009 to match the hardening pass; Known Issues updated again
+  in 0010 for the boundary-crash fix.
 - `CHAT_STATE.md` - this file; created (uploaded already-existing) as of
-  diff 0008's chat, updated here as part of diff 0009.
+  diff 0008's chat, updated with each diff since (0009, 0010).
 
 ## Current Implementation State
 
-Diffs `0001`-`0009` are believed complete and internally consistent. The
-0009 changes were reviewed via `node --check` (server `.js` files) and a
-TypeScript-parser-based JSX syntax check (client `.jsx` files, via
-`ts.createSourceFile` with `ScriptKind.JSX` - no compiler/bundler was
-available in the sandbox to actually build the client) plus manual
-brace/paren balance counts - but **none of it has been run against a live
-server + MongoDB, and the client has never been built/served**. Treat as
-"should work, not confirmed working."
+Diffs `0001`-`0009` are confirmed applied and the server side is confirmed
+live-working: `npm install` succeeded on both server/client, and the
+server connected to a real MongoDB instance. The client itself crashed on
+first real use (see Problems/Errors) - diff `0010` fixes that specific
+crash but **has not yet been re-tested live by the user** as of this
+writing. Everything else in `PROJECT_CONTEXT.md`'s "Completed" list is
+still only statically reviewed (syntax checks, JSX parse checks, manual
+tracing), not live-confirmed - treat those as "should work", and the
+canvas specifically as "one confirmed crash, fix applied, awaiting
+re-test."
 
 ## Problems / Errors
 
-**None reported by the user yet** - no live testing has happened in this
-conversation or the previous one. The bugs mentioned in Work Completed
-(keystroke-autosave, pending-edge `indexOf`) were caught during review, not
-reported by the user, and are not outstanding.
+1. **[FIXED in diff 0010]** First live run: dragging/positioning a deed
+   card near the canvas's boundary crashed the whole `Canvas` component
+   with `Uncaught Error: Maximum update depth exceeded` (React's
+   nested-update-cascade guard tripping inside the anchor-measurement
+   `useLayoutEffect`/`ResizeObserver` combo), which blanked the page.
+   Reported by the user with the full browser console stack trace. Root
+   cause and fix described in Work Completed #10 above. **Ask the user to
+   confirm this is actually resolved after applying 0010** - the fix was
+   derived from static analysis of the crash trace, not a live repro in
+   this sandbox (no browser/network access here), so treat it as
+   "should fix it" rather than "confirmed fixed" until they retest the
+   exact scenario (drag a card near/past the canvas edge, including while
+   it's expanded).
+2. A benign-looking `Failed to load resource: 404` also appeared in the
+   console alongside the crash - not yet identified (most likely an
+   unrelated favicon/asset request, could also be an artifact of the
+   crash itself interrupting the page). Not investigated since it wasn't
+   called out as a separate problem by the user; revisit if it recurs
+   independently of the crash after 0010.
 
 ## Debugging Already Done
 
-N/A - no live debugging session has occurred yet in this project. All
-verification so far has been static (see Current Implementation State).
+Problem #1 above: diagnosed from the user-supplied stack trace alone (
+`checkForNestedUpdates` -> `dispatchSetState` at `Canvas.jsx:125`, inside
+the anchor-measurement `useLayoutEffect`). Reasoned through the component
+tree statically (no live repro available in this sandbox) to find two
+compounding issues: (a) the canvas's content-box sizing only accounted for
+auto-layout positions, not manual/live-drag ones, so a dragged card could
+overflow the stated box; (b) `setAnchors` had no guard against redundant
+updates, so any resulting measure/render cycle had no circuit breaker.
+Fixed both; not yet confirmed against the user's actual browser.
 
 ## Important Decisions Made
 
@@ -179,7 +223,7 @@ single-field search topic uses regex rather than `$text` because Mongo's
   this particular chat had direct file access via an uploaded zip (not
   Claude Code) - the user wants changes as git-apply-able `.diff` files
   regardless of how Claude read the code. Diff numbering continues from
-  `0008`, so this hardening pass is `0009`.
+  `0008`; currently at `0010`.
 - The scratch working copy for this chat is `/home/claude/deed-tracker/
   Deed-Tracker-main` (unzipped from the user's upload, then `git init`'d
   fresh as a baseline commit) - **local to this sandbox, will not exist in
@@ -187,17 +231,31 @@ single-field search topic uses regex rather than `$text` because Mongo's
   paste `git diff`/file contents) rather than assume the scratch repo
   persists.
 - The user's repo is `github.com/Rounakag16/Deed-Tracker`, `main` branch.
-- Diffs `0008` and `0009` were generated in this chat from the uploaded
-  zip, not confirmed-applied by the user yet as of this writing - **verify
-  before assuming the live repo matches these files.**
+- Diffs `0001`-`0009` are confirmed applied (the user ran `npm install` +
+  connected to a live MongoDB successfully on that state). Diff `0010` was
+  generated in response to the crash that live test surfaced -
+  **not yet confirmed applied or re-tested as of this writing.**
+- **No live browser/network access exists in this sandbox** - diff 0010's
+  fix was derived entirely from reading the user's pasted stack trace and
+  reasoning through the component statically. This is a meaningfully
+  weaker verification standard than the rest of the codebase's own static
+  checks (syntax/JSX-parse/balance), since a logic bug like a render loop
+  can't be fully ruled out without actually running it. Treat 0010 as
+  "should fix it" until the user confirms.
 
 ## Pending Work
 
 From `PROJECT_CONTEXT.md`'s "Not implemented" / "Partially completed"
 lists, still open as of this chat:
-- **End-to-end live testing (MongoDB connection, `npm install` both sides,
-  smoke-testing every feature) - this is the immediate next task**, not a
-  "someday" item. Nothing below this should be picked up before it.
+- **Re-test the canvas boundary-crash fix (diff 0010) live** - this is the
+  immediate next task. Specifically: drag a card near/past the canvas
+  edge (both collapsed and expanded), and drag it while zoomed in/out.
+- **Continue the end-to-end smoke test** from where diff 0009's crash
+  interrupted it (see Exact Next Steps in the previous entry - workspace
+  create, deed CRUD incl. blank-deed-number validation, relationship
+  wiring incl. cycle rejection, Save/reload persistence, inline edit,
+  Excel export, Lineage view, search incl. pagination) - none of that has
+  been confirmed yet, the first crash happened early.
 - Authentication (explicitly deferred, only add if the user asks)
 - Deployment/hosting setup (none exists)
 - Bulk import from the old Firebase version's data (never requested, just
@@ -207,34 +265,32 @@ lists, still open as of this chat:
 
 ## Exact Next Steps
 
-1. Present diff `0009` (this hardening pass, bundled with both doc
-   updates) to the user with exact `git apply`/`git add -A`/`git commit`/
-   `git push` instructions.
-2. Walk the user through actually running the app for the first time:
-   - MongoDB: Atlas free cluster or local instance; get a connection
-     string.
-   - `cd server && cp .env.example .env`, fill in `MONGODB_URI`,
-     `npm install`, `npm run dev` - confirm it logs "MongoDB connected"
-     and "Server listening on port 4000".
-   - `cd client && npm install && npm run dev` - open the printed
-     localhost URL.
-3. Smoke test in order: create a workspace → add several deeds (including
+1. Present diff `0010` (Canvas.jsx boundary-crash fix, bundled with both
+   doc updates) to the user with exact `git apply`/`git add -A`/
+   `git commit`/`git push` instructions.
+2. Ask the user to re-run the app and specifically retry the crash
+   scenario: drag a deed card near/past the canvas edge, both collapsed
+   and expanded, and try it at different zoom levels.
+3. If that's clean, resume the original smoke-test checklist from diff
+   0009's handoff (see Pending Work above) in order, stopping at the first
+   thing that breaks: create a workspace → add several deeds (including
    trying to save one with a blank deed number, to confirm the new
    validation error shows cleanly) → drag-wire some converging/diverging
    relationships (including attempting a 3-hop cycle, to confirm it's
-   rejected) → drag-reposition a card → try the new pan/zoom controls →
-   Save → reload and confirm persistence → expand and edit a saved deed
-   (confirm no cursor-jump regression) → export to Excel and open the file
-   → open the Lineage/View tab → search (both scoped and global, all-topic
-   and single-topic, confirm pagination Prev/Next work once results exceed
-   a page) and click a result to confirm it navigates correctly →
-   paginate the workspace list once there are >20 workspaces (or lower
-   `PAGE_SIZE` temporarily to test with fewer).
-4. Whatever breaks, get the **exact error message/behavior** from the
-   user and fix it as the next numbered diff (`0010`) - do not guess at
-   fixes without a concrete repro/error.
-5. Once smoke-tested clean, return to the still-open backlog above
-   (auth, deployment, bulk import, etc.) only as the user prioritizes them.
+   rejected) → drag-reposition a card → try the pan/zoom controls → Save →
+   reload and confirm persistence → expand and edit a saved deed (confirm
+   no cursor-jump regression) → export to Excel and open the file → open
+   the Lineage/View tab → search (both scoped and global, all-topic and
+   single-topic, confirm pagination Prev/Next work once results exceed a
+   page) and click a result to confirm it navigates correctly → paginate
+   the workspace list once there are >20 workspaces (or lower `PAGE_SIZE`
+   temporarily to test with fewer).
+4. Whatever breaks next, get the **exact error message/behavior** from the
+   user and fix it as the next numbered diff (`0011`) - do not guess at
+   fixes without a concrete repro/error, the same way 0010 was diagnosed
+   from the actual stack trace rather than a guess.
+5. Once smoke-tested clean, return to the still-open backlog (auth,
+   deployment, bulk import, etc.) only as the user prioritizes them.
 
 ## User Requirements For The Current Task
 
@@ -243,7 +299,7 @@ lists, still open as of this chat:
   tier, chat only, no other tools available to the user for applying
   changes besides `git apply`.
 - Keep diff numbering sequential and continuous across the whole project
-  (currently through `0009`).
+  (currently through `0010`).
 - Give exact shell commands for applying each diff every time (the user
   has been running the same `git apply` / `git add -A` / `git commit` /
   `git push` sequence throughout).

@@ -13,6 +13,19 @@ function deedLabel(deed) {
   return buyer ? `${num} - ${buyer}` : num;
 }
 
+function anchorsEqual(a, b) {
+  if (a === b) return true;
+  if (a.size !== b.size) return false;
+  for (const [key, v] of a) {
+    const w = b.get(key);
+    if (!w) return false;
+    if (v.top.x !== w.top.x || v.top.y !== w.top.y || v.bottom.x !== w.bottom.x || v.bottom.y !== w.bottom.y) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Must match DeedCard.jsx's card width exactly - see the comment there.
 const NODE_W = 400;
 const NODE_H_ESTIMATE = 110; // only used for layout spacing; actual dot
@@ -93,7 +106,7 @@ export default function Canvas({ workspace, onView }) {
     [savedRelationships, pendingEdges]
   );
 
-  const { positions, width, height } = useMemo(() => {
+  const { positions, width: layoutWidth, height: layoutHeight } = useMemo(() => {
     const layerById = computeLayers(allKeys, graphEdges);
     return computePositions(allKeys, layerById, {
       nodeW: NODE_W,
@@ -104,6 +117,31 @@ export default function Canvas({ workspace, onView }) {
       direction: "vertical",
     });
   }, [allKeys, graphEdges]);
+
+  // The auto-layout algorithm above only knows about auto-arranged
+  // positions - it has no idea a card has been manually dragged somewhere
+  // else. Without accounting for that, a card dragged near/past the
+  // layout's assumed width/height would overflow the canvas's stated
+  // content box, which (combined with the anchor-measurement effect below)
+  // could send the browser into a resize/measure feedback loop. Grow the
+  // content box to always cover every card's actual resolved position.
+  const { width, height } = useMemo(() => {
+    let maxX = layoutWidth;
+    let maxY = layoutHeight;
+    allCards.forEach((deed) => {
+      const pos = deed.position;
+      if (!pos) return;
+      maxX = Math.max(maxX, pos.x + NODE_W + PADDING);
+      maxY = Math.max(maxY, pos.y + NODE_H_ESTIMATE + PADDING);
+    });
+    // Also grow to cover the card currently being dragged, in real time -
+    // otherwise the boundary is only corrected after the drag ends.
+    if (liveDragPos) {
+      maxX = Math.max(maxX, liveDragPos.x + NODE_W + PADDING);
+      maxY = Math.max(maxY, liveDragPos.y + NODE_H_ESTIMATE + PADDING);
+    }
+    return { width: maxX, height: maxY };
+  }, [allCards, layoutWidth, layoutHeight, liveDragPos]);
 
   // Measure real dot positions from the DOM so edges connect to wherever a
   // card's top/bottom actually is, regardless of expanded/collapsed height.
@@ -122,7 +160,11 @@ export default function Canvas({ workspace, onView }) {
         bottom: { x: br.left + br.width / 2 - contentRect.left, y: br.top + br.height / 2 - contentRect.top },
       });
     });
-    setAnchors(next);
+    // Guard against a render/measure feedback loop: only actually update
+    // state (triggering a re-render) if something really moved. Without
+    // this, any effect/observer that fires on every render (directly or
+    // indirectly) can cascade into React's "Maximum update depth exceeded".
+    setAnchors((prev) => (anchorsEqual(prev, next) ? prev : next));
   }, [allKeys]);
 
   useLayoutEffect(recomputeAnchors, [recomputeAnchors, positions, liveDragPos, savedDeeds, draftDeeds]);
