@@ -13,6 +13,15 @@ function deedLabel(deed) {
   return buyer ? `${num} - ${buyer}` : num;
 }
 
+function heightsEqual(a, b) {
+  if (a === b) return true;
+  if (a.size !== b.size) return false;
+  for (const [key, v] of a) {
+    if (b.get(key) !== v) return false;
+  }
+  return true;
+}
+
 function anchorsEqual(a, b) {
   if (a === b) return true;
   if (a.size !== b.size) return false;
@@ -61,6 +70,7 @@ export default function Canvas({ workspace, onView }) {
   const topDotRefs = useRef(new Map());
   const bottomDotRefs = useRef(new Map());
   const [anchors, setAnchors] = useState(new Map());
+  const [cardHeights, setCardHeights] = useState(new Map());
 
   const load = () => {
     api.listDeeds(workspace._id).then(setSavedDeeds);
@@ -106,8 +116,9 @@ export default function Canvas({ workspace, onView }) {
     [savedRelationships, pendingEdges]
   );
 
-  const { positions, width: layoutWidth, height: layoutHeight } = useMemo(() => {
-    const layerById = computeLayers(allKeys, graphEdges);
+  const layerById = useMemo(() => computeLayers(allKeys, graphEdges), [allKeys, graphEdges]);
+
+  const { positions, width: layoutWidth } = useMemo(() => {
     return computePositions(allKeys, layerById, {
       nodeW: NODE_W,
       nodeH: NODE_H_ESTIMATE,
@@ -116,7 +127,42 @@ export default function Canvas({ workspace, onView }) {
       padding: PADDING,
       direction: "vertical",
     });
-  }, [allKeys, graphEdges]);
+  }, [allKeys, layerById]);
+
+  // Row spacing above is based on a fixed height estimate, so an expanded
+  // (mid-edit) card - which is much taller - can visually overlap the row
+  // below it (see PROJECT_CONTEXT.md Known Issues). Fix: measure each
+  // auto-positioned card's real rendered height (cardHeights, populated by
+  // the ResizeObserver below) and grow that row's spacing to fit the
+  // tallest card actually in it, pushing every row after it down. Manually
+  // positioned/mid-drag cards are excluded - they don't live in a "row".
+  const { autoPositions, rowLayoutHeight } = useMemo(() => {
+    const heightsByLayer = new Map();
+    allCards.forEach((deed) => {
+      const key = keyFor(deed);
+      if (deed.position) return;
+      if (liveDragPos?.key === key) return;
+      const l = layerById.get(key) ?? 0;
+      const measured = cardHeights.get(key) || NODE_H_ESTIMATE;
+      heightsByLayer.set(l, Math.max(heightsByLayer.get(l) || NODE_H_ESTIMATE, measured));
+    });
+
+    const layers = [...new Set(allKeys.map((k) => layerById.get(k) ?? 0))].sort((a, b) => a - b);
+    const rowOffset = new Map();
+    let cumulative = PADDING;
+    layers.forEach((l) => {
+      rowOffset.set(l, cumulative);
+      cumulative += (heightsByLayer.get(l) || NODE_H_ESTIMATE) + ROW_GAP;
+    });
+
+    const next = new Map();
+    positions.forEach((pos, key) => {
+      const l = layerById.get(key) ?? 0;
+      next.set(key, { x: pos.x, y: rowOffset.get(l) ?? pos.y });
+    });
+
+    return { autoPositions: next, rowLayoutHeight: layers.length ? cumulative - ROW_GAP + PADDING : PADDING * 2 };
+  }, [allCards, allKeys, layerById, cardHeights, positions, liveDragPos]);
 
   // The auto-layout algorithm above only knows about auto-arranged
   // positions - it has no idea a card has been manually dragged somewhere
@@ -127,7 +173,7 @@ export default function Canvas({ workspace, onView }) {
   // content box to always cover every card's actual resolved position.
   const { width, height } = useMemo(() => {
     let maxX = layoutWidth;
-    let maxY = layoutHeight;
+    let maxY = rowLayoutHeight;
     allCards.forEach((deed) => {
       const pos = deed.position;
       if (!pos) return;
@@ -141,7 +187,7 @@ export default function Canvas({ workspace, onView }) {
       maxY = Math.max(maxY, liveDragPos.y + NODE_H_ESTIMATE + PADDING);
     }
     return { width: maxX, height: maxY };
-  }, [allCards, layoutWidth, layoutHeight, liveDragPos]);
+  }, [allCards, layoutWidth, rowLayoutHeight, liveDragPos]);
 
   // Measure real dot positions from the DOM so edges connect to wherever a
   // card's top/bottom actually is, regardless of expanded/collapsed height.
@@ -167,17 +213,38 @@ export default function Canvas({ workspace, onView }) {
     setAnchors((prev) => (anchorsEqual(prev, next) ? prev : next));
   }, [allKeys]);
 
-  useLayoutEffect(recomputeAnchors, [recomputeAnchors, positions, liveDragPos, savedDeeds, draftDeeds]);
+  // Measures each card wrapper's real rendered height so row spacing can
+  // grow to fit an expanded card (see the autoPositions/rowLayoutHeight
+  // memo above). Same equality-guard pattern as recomputeAnchors, for the
+  // same reason: an unguarded setState inside a ResizeObserver callback
+  // that itself feeds back into layout can cascade into a render loop.
+  const recomputeCardHeights = useCallback(() => {
+    const next = new Map();
+    wrapperRefs.current.forEach((el, key) => {
+      if (!el) return;
+      next.set(key, el.getBoundingClientRect().height);
+    });
+    setCardHeights((prev) => (heightsEqual(prev, next) ? prev : next));
+  }, []);
+
+  useLayoutEffect(() => {
+    recomputeAnchors();
+    recomputeCardHeights();
+  }, [recomputeAnchors, recomputeCardHeights, autoPositions, liveDragPos, savedDeeds, draftDeeds]);
 
   useEffect(() => {
-    const observer = new ResizeObserver(recomputeAnchors);
+    const handleResize = () => {
+      recomputeAnchors();
+      recomputeCardHeights();
+    };
+    const observer = new ResizeObserver(handleResize);
     wrapperRefs.current.forEach((el) => el && observer.observe(el));
-    window.addEventListener("resize", recomputeAnchors);
+    window.addEventListener("resize", handleResize);
     return () => {
       observer.disconnect();
-      window.removeEventListener("resize", recomputeAnchors);
+      window.removeEventListener("resize", handleResize);
     };
-  }, [allKeys, recomputeAnchors]);
+  }, [allKeys, recomputeAnchors, recomputeCardHeights]);
 
   // Drag-to-wire: mousedown on a card's bottom (output) dot starts a drag;
   // dropping on another card's top (input) dot queues a link for confirmation.
@@ -233,7 +300,7 @@ export default function Canvas({ workspace, onView }) {
   const resolvedPos = (key, deed) => {
     if (liveDragPos && liveDragPos.key === key) return { x: liveDragPos.x, y: liveDragPos.y };
     if (deed.position) return deed.position;
-    return positions.get(key);
+    return autoPositions.get(key);
   };
 
   const commitCardPosition = (key, pos) => {

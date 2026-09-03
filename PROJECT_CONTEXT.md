@@ -244,7 +244,7 @@ No authentication on any route (see Authentication section).
 | DELETE | `/workspaces/:id` | Delete workspace + cascade its deeds/relationships |
 | GET | `/workspaces/:workspaceId/deeds` | List deeds in a workspace. Returns a bare array, unpaginated - see Known Issues for why |
 | POST | `/workspaces/:workspaceId/deeds` | Create one or many deeds - body `{ deeds: [...] }` (or a single deed object as fallback). 400 on missing/blank deed number |
-| PUT | `/workspaces/:workspaceId/deeds/:deedId` | Update a deed (partial `$set` of whatever fields are sent, including `position`) |
+| PUT | `/workspaces/:workspaceId/deeds/:deedId` | Update a deed (partial `$set` of whatever fields are sent, including `position`). Server strips `_id`/`__v`/`createdAt`/`updatedAt`/`workspaceId` from the body before the `$set`, regardless of what the client sends |
 | DELETE | `/workspaces/:workspaceId/deeds/:deedId` | Delete a deed + cascade its relationships |
 | GET | `/workspaces/:workspaceId/relationships` | List edges in a workspace |
 | POST | `/workspaces/:workspaceId/relationships` | Create one or many edges - body `{ relationships: [...] }`. Rejects any edge that is a self-loop or would close a multi-hop cycle (400, all-or-nothing). Duplicate edges are silently skipped (207 response) |
@@ -415,12 +415,17 @@ client will need a login flow added ahead of `WorkspaceList.jsx`.
 
 ## Known Issues
 
-- **Expanded (mid-edit) cards can visually overlap the card below them**
-  in the same auto-layout column, because layout spacing is based on an
-  estimated fixed node height while actual expanded height is much larger.
-  Collapsing the card fixes it. Known and accepted trade-off, not yet
-  fixed. Related but distinct from the boundary-overflow crash below -
-  that one is fixed, this visual-overlap one is still open.
+- **[FIXED] Expanded (mid-edit) cards could visually overlap the card
+  below them** in the same auto-layout row, because row spacing was based
+  on a fixed estimated node height while actual expanded height is much
+  larger. Fixed by measuring each auto-positioned card's real rendered
+  height (`cardHeights` in `Canvas.jsx`, populated the same
+  ResizeObserver-based way anchor positions already were) and growing that
+  row's spacing to fit the tallest card actually in it, pushing every row
+  after it down. Manually positioned/mid-drag cards are excluded from this
+  calculation since they don't live in an auto-layout row. Not yet
+  live-confirmed (no browser access in this sandbox - see Development
+  Conventions).
 - **Server-side validation covers deed number only** (required + non-blank).
   Other fields (area/plot numbers, etc.) remain free-text with no format
   validation - by design for now, since the domain data (khatiya/plot

@@ -2,310 +2,219 @@
 
 ## Current Objective
 
-The user uploaded the whole repo as a zip into a **fresh chat with direct
-codebase access** (not the diff-only chat-tier workflow this file was
-written under) and asked whether the full original project scope was
-built. Answer: yes, functionally - see `PROJECT_CONTEXT.md`'s "Current
-Project Status". They then asked to fix the outstanding hardening items
-*before* the first live end-to-end test - that was diff `0009`, **confirmed
-applied**, and the user did the first-ever live run against a real
-MongoDB: server connected fine, but the canvas crashed with a React
-"Maximum update depth exceeded" error when a card was positioned near the
-canvas boundary. Diff `0010` below fixes that. Live testing is still
-in progress - this is the first real bug found, not the only one expected.
+Fresh chat, again with direct codebase access (a re-uploaded zip, not
+Claude Code) - the user asked to read the whole project + git history +
+prior chat state, then fix current bugs/issues and keep building toward
+the end goal. This chat's zip was diff `0010`'s state (confirmed: the
+working tree matched `HEAD` exactly except for CRLF line-ending noise
+introduced by the user's local Windows checkout, and a leftover
+`0010-canvas-boundary-crash-fix.diff` file that had already been applied
+and could be deleted). No new live-testing has happened since diff `0010`
+was generated - this chat is still static-review-only (see Current
+Code/Architecture Considerations).
+
+This chat produced diff `0011`, delivered below.
 
 ## Work Completed In This Chat
 
-Chronological, as delivered diffs `0001`-`0008` (see Files Changed below
-for exact repo mapping):
-
-1. **Initial MERN scaffold** - rewrote the original Firebase/tree-based app
-   from scratch as workspaces + deed graph + search + Excel export,
-   preserving the original deed field schema.
-2. **Bug fix**: saved-deed edits were firing a PUT + full reload on every
-   keystroke (cursor-jumping, unusable typing). Fixed by adding local edit
-   buffering with explicit Save/Discard in `DeedCard.jsx`.
-3. **Lineage graph tab** - first version, SVG diagram, auto-layout,
-   left-to-right at this point.
-4. **Lineage detail panel** - click a node, see full deed fields + clickable
-   parent/child lists.
-5. **Node-editor canvas rebuild** - replaced click-to-select connecting
-   with true drag-from-dot-to-dot wiring, matching a reference screenshot
-   (GitHub-Actions-style workflow diagram) the user provided. Switched
-   layout from left-to-right to **top-to-bottom** to match that reference.
-   Extracted shared layout math into `client/src/layout.js` so the edit
-   canvas and the read-only Lineage view stay visually identical. Added
-   the "View" button (opens read-only Lineage). Removed the earlier
-   "Add 5 Deeds" shortcut per request.
-   - Caught and fixed a bug **before shipping** it: pending-edge
-     click-to-delete used `pendingEdges.indexOf(edgeObject)` on a freshly
-     spread copy, which always returns -1. Fixed by tagging each pending
-     edge with `pendingIndex` at map time.
-6. **Free-drag card positioning** - cards can now be dragged anywhere;
-   position persists per-deed (`Deed.position: {x,y}`) immediately on
-   drop for saved deeds, held in draft state for unsaved ones. Added
-   "Reset Layout" to clear manual positions back to auto-arrange.
-7. **Completion pass** (duplicate deed-number warning banner, workspace
-   rename UI wired to the already-existing PATCH endpoint, search results
-   made clickable and jump into the Lineage view with cross-workspace
-   switching if needed). Added `GET /api/workspaces/:id` server route to
-   support that workspace switch.
-8. **`PROJECT_CONTEXT.md`** written - stable, non-conversational project
-   reference (architecture, schema, API, decisions, known issues, etc).
-   Do not duplicate its contents here.
-9. **Hardening pass** (this chat, direct codebase access):
-   - Multi-hop cycle prevention on relationship creation (BFS against
-     existing + same-batch edges; all-or-nothing rejection).
-   - Server-side validation: `deedInfo.deedNumber` required + non-blank;
-     added `asyncHandler.js` + a generic-error-handler upgrade so Mongoose
-     `ValidationError`/`CastError` reach the client as clean 400s instead
-     of hanging (previously async route errors were unhandled rejections).
-   - Search now uses the Mongo `$text` index for `topic=all` (relevance-
-     sorted); scoped single-field topics still use regex (a `$text` query
-     can't be restricted to one field of a compound text index).
-   - Pagination added to `/workspaces` (`{ workspaces, total, page,
-     limit }`) and `/search` (`{ results, total, page, limit }`);
-     per-workspace deed list left unpaginated on purpose (canvas needs
-     the full graph).
-   - Canvas: wider viewport (max-w-1800px, viewport-relative max-height),
-     pan-by-dragging the background, zoom controls (40%-150%), and cards
-     widened 320px->400px (`NODE_W`, kept in sync with `DeedCard.jsx`) to
-     fix the land-parcel RS/LR/Area row overflowing the card.
-10. **Live-testing bug fix (diff 0010)**: first live run (real MongoDB)
-    surfaced a React "Maximum update depth exceeded" crash on `Canvas.jsx`
-    when a card sat near/past the canvas's assumed boundary. Root cause:
-    the auto-layout math that sizes the canvas's content box only knows
-    about auto-arranged card positions, not manually-dragged ones - a
-    dragged card past that assumed boundary overflowed the stated content
-    box, and the anchor-measurement effect had no guard against
-    re-triggering on essentially-unchanged geometry, so the two could
-    cascade. Fixed by (a) growing the content box to also cover every
-    card's actual `position` (including the live position of a card
-    currently mid-drag), and (b) adding an equality check before
-    `setAnchors` so a measurement that didn't actually change never
-    triggers a re-render.
+1. **Read the full repo, `git log`, and both hand-off docs** before
+   touching anything. Confirmed via `git diff --stat -w` that the
+   uploaded zip's working tree matched commit `247853a` (diff `0010`)
+   exactly aside from CRLF noise - i.e. diff `0010` is applied and
+   committed, contrary to the prior chat's uncertainty about that.
+2. **Attempted to actually run the app** (not just statically review it)
+   since this chat had direct file access: `node_modules` were present for
+   both `client` and `server`, but they were installed on Windows
+   (`@esbuild/win32-x64`, `@rollup/rollup-win32-x64-msvc` etc., no Linux
+   binaries) and this sandbox has no network access to fetch Linux
+   equivalents or to install/run MongoDB - so `vite build`, `esbuild`, and
+   any real client build all failed at the native-binary-resolution step.
+   Fell back to `@babel/parser` (pure JS, no native binary) to
+   syntax-check every client `.js`/`.jsx` file, and `node --check` for
+   every server file - all clean. This is a weaker check than a real build
+   (catches syntax errors, not type/logic bugs) but is strictly better
+   than the pure manual-reading review prior chats were limited to.
+3. **Fixed the Known Issues row-overlap bug** (`client/src/components/Canvas.jsx`):
+   an expanded (mid-edit) card could visually overlap the card below it in
+   the same auto-layout row, because row spacing used a fixed height
+   estimate (`NODE_H_ESTIMATE`) instead of the card's real (much taller)
+   expanded height. Fixed by extending the existing DOM-measurement
+   pattern (the same one `recomputeAnchors`/`ResizeObserver` already use
+   for wire endpoints) to also measure each auto-positioned card's actual
+   rendered height (`cardHeights` state, `recomputeCardHeights`
+   callback), then computing per-row spacing from the tallest card
+   actually measured in that row instead of the fixed estimate. Manually
+   positioned/mid-drag cards are excluded from the row-height calculation
+   since they don't live in an auto-layout row. Same equality-guard
+   pattern as the existing anchor measurement (`heightsEqual`, mirroring
+   `anchorsEqual`) to avoid reintroducing the "Maximum update depth
+   exceeded" render-loop class of bug that diff `0010` fixed - reasoned
+   through carefully since there's no live browser here to catch a
+   render-loop regression by just running it.
+4. **Small server hardening pass** (`server/src/routes/deeds.js`), found
+   during the same read-through:
+   - Fixed a stale comment on the deed-creation route that said
+     `insertMany` runs `ordered:false` when the code actually (and
+     correctly) uses `ordered:true` - no behavior change, just corrected
+     the comment to match the code and explain why `ordered:true` matters
+     here (all-or-nothing batch validation, which `Canvas.jsx`'s
+     `handleSaveAll` already assumes when it maps `created[i]` back onto
+     `draftDeeds` by index).
+   - The PUT deed route now strips `_id`/`__v`/`createdAt`/`updatedAt`/
+     `workspaceId` from the request body server-side before `$set`. The
+     client already does this (`Canvas.jsx`'s `onSave`), but that was only
+     a client-side courtesy - a stray or old client build could otherwise
+     move a deed to a different workspace or overwrite its id via the PUT
+     body. Defense-in-depth, not a live bug report.
+5. **Reviewed every other file for correctness** (`App.jsx`, `api.js`,
+   `DeedCard.jsx`, `DeedForm.jsx`, `LineageGraph.jsx`, `SearchPanel.jsx`,
+   `WorkspaceList.jsx`, `search.js`, `relationships.js`, `export.js`,
+   `workspaces.js`, `server.js`, both Mongoose models) - traced the cycle
+   BFS logic, the search pagination/text-index branching, the
+   edit-buffering pattern, the Save/id-resolution flow, and the Lineage
+   view's key handling. No further bugs found; nothing else changed.
+6. **`PROJECT_CONTEXT.md`**: marked the row-overlap Known Issue `[FIXED]`
+   with the fix description above; added a one-line note to the PUT-deed
+   API row about the new server-side field-stripping.
 
 ## Files Changed
 
-Cumulative, across diffs `0001`-`0010` (`0001`-`0009` confirmed applied by
-the user to `github.com/Rounakag16/Deed-Tracker`, `main` branch, including
-a successful `npm install` + live MongoDB connection on both `0001`-`0009`;
-`0010` was generated in response to the bug that live test surfaced -
-**confirm with the user it's been applied** before assuming their repo
-matches this file):
+- `client/src/components/Canvas.jsx` - row-overlap fix (see #3 above):
+  new `cardHeights` state + `recomputeCardHeights` callback +
+  `heightsEqual` guard; `layerById` pulled out into its own memo so it's
+  shared between the position calculation and the new row-height
+  calculation; `positions`/`layoutHeight` (fixed-estimate) replaced by
+  `autoPositions`/`rowLayoutHeight` (row-aware) everywhere they were used
+  (`resolvedPos`, the content-box-growing memo from diff `0010`, the
+  anchor-measurement effect's dependency array).
+- `server/src/routes/deeds.js` - comment fix on POST (no behavior
+  change) + PUT now strips protected fields from the body server-side
+  (see #4 above).
+- `PROJECT_CONTEXT.md` - Known Issues + API table updated to match.
+- `CHAT_STATE.md` - this file, rewritten for this chat.
 
-- `server/src/models/Deed.js` - full deed schema; `position` field added
-  in diff 0006; `deedInfo.deedNumber` made required+non-blank in 0009.
-- `server/src/models/Relationship.js`, `server/src/models/Workspace.js` -
-  unchanged since diff 0001.
-- `server/src/routes/workspaces.js` - `GET /:id` added in diff 0007;
-  pagination (`page`/`limit` -> `{workspaces,total,page,limit}`) and
-  `asyncHandler` wrap added in 0009.
-- `server/src/routes/deeds.js` - `asyncHandler` wrap in 0009 (no
-  behavior change besides errors now surfacing instead of hanging);
-  unchanged since diff 0001 otherwise.
-- `server/src/routes/relationships.js` - multi-hop cycle prevention +
-  `asyncHandler` wrap added in 0009; unchanged since diff 0001 otherwise.
-- `server/src/routes/search.js` - switched `topic=all` to `$text`,
-  added pagination, `asyncHandler` wrap - all in 0009; unchanged since
-  diff 0001 before that.
-- `server/src/routes/export.js` - `asyncHandler` wrap added in 0009
-  (no other change).
-- `server/src/server.js` - generic error handler upgraded in 0009 to
-  translate Mongoose `ValidationError`/`CastError`/duplicate-key errors
-  into 400/409s.
-- `server/src/utils/asyncHandler.js` - **created** in diff 0009.
-- `client/src/layout.js` - **created** in diff 0005 (shared auto-layout
-  algorithm), extended with a `direction` param (vertical/horizontal) in
-  the same diff; unchanged in 0009.
-- `client/src/api.js` - `updateWorkspace`, `getWorkspace` added in diff
-  0007; `listWorkspaces`/`search` updated for pagination params/response
-  shape in 0009.
-- `client/src/App.jsx` - rewritten in diff 0007 to own `selectedDeedId`
-  state and cross-workspace search navigation; unchanged in 0009.
-- `client/src/components/Canvas.jsx` - rewritten twice before this chat:
-  diff 0005 (node editor with drag-to-wire), diff 0006 (card
-  drag-to-reposition + Reset Layout), diff 0007 (duplicate deed-number
-  banner). Diff 0009 added pan/zoom, widened the viewport and `NODE_W`
-  (320->400), and added `data-card-wrapper`/`stopPropagation` so card-drag
-  and background-pan don't fight each other. Diff 0010 (bug fix): content
-  box now grows to cover manually-positioned/mid-drag cards, and
-  `setAnchors` is equality-guarded to stop a measure/render feedback loop
-  - see Work Completed #10. Still the largest/most complex file in the
-  project.
-- `client/src/components/DeedCard.jsx` - edit-buffering fix in diff 0002;
-  simplified in diff 0005 to drop the old click-to-select connect-mode
-  props; width bumped 320px->400px (`w-[400px]`) in diff 0009 to match
-  `Canvas.jsx`'s `NODE_W`.
-- `client/src/components/LineageGraph.jsx` - created diff 0003; detail
-  panel added diff 0004; refactored to use shared `layout.js` + vertical
-  orientation in diff 0005; `onBack`/`initialSelectedId` props added in
-  diffs 0005/0007 respectively; untouched in 0009 (its own compact
-  `NODE_W=190` is intentionally separate from the editable canvas's).
-- `client/src/components/WorkspaceList.jsx` - rename UI added diff 0007;
-  pagination controls (Prev/Next) added in 0009.
-- `client/src/components/SearchPanel.jsx` - results made clickable
-  (`onSelectDeed` prop) in diff 0007; pagination controls added in 0009.
-- `client/src/components/DeedForm.jsx` - unchanged since diff 0001; exports
-  `blankDeed()`. (Not edited in 0009 - the card-width bump on the parent
-  was enough to fix the overflow, no internal layout change needed.)
-- `PROJECT_CONTEXT.md` - created diff 0008; Current Project Status, Known
-  Issues, Repository Structure, Database, API, and Major Features sections
-  updated in 0009 to match the hardening pass; Known Issues updated again
-  in 0010 for the boundary-crash fix.
-- `CHAT_STATE.md` - this file; created (uploaded already-existing) as of
-  diff 0008's chat, updated with each diff since (0009, 0010).
+Everything else in the repo (`server/src/models/*`, `server/src/routes/{workspaces,relationships,search,export}.js`,
+`server/src/server.js`, `server/src/utils/*`, and every other `client/src`
+file) is unchanged from diff `0010`'s state.
 
 ## Current Implementation State
 
-Diffs `0001`-`0009` are confirmed applied and the server side is confirmed
-live-working: `npm install` succeeded on both server/client, and the
-server connected to a real MongoDB instance. The client itself crashed on
-first real use (see Problems/Errors) - diff `0010` fixes that specific
-crash but **has not yet been re-tested live by the user** as of this
-writing. Everything else in `PROJECT_CONTEXT.md`'s "Completed" list is
-still only statically reviewed (syntax checks, JSX parse checks, manual
-tracing), not live-confirmed - treat those as "should work", and the
-canvas specifically as "one confirmed crash, fix applied, awaiting
-re-test."
+Same live-testing status as before this chat: diffs `0001`-`0009` are
+confirmed applied and server-side confirmed live-working (real MongoDB
+connection); diff `0010`'s crash fix and this chat's diff `0011` are both
+**only statically reviewed** (syntax-checked via `@babel/parser`/`node
+--check`, and diff `0011`'s patch itself was verified to `git apply
+--check` cleanly against a pristine copy of `HEAD` in this sandbox) -
+neither has been exercised in a real browser against a real MongoDB yet.
+The very first live smoke test (diff `0009`'s state) got as far as
+"connect to MongoDB, hit the boundary crash" before diff `0010` was
+written to fix that crash - the rest of the smoke-test checklist below
+has never been run.
 
 ## Problems / Errors
 
-1. **[FIXED in diff 0010]** First live run: dragging/positioning a deed
-   card near the canvas's boundary crashed the whole `Canvas` component
-   with `Uncaught Error: Maximum update depth exceeded` (React's
-   nested-update-cascade guard tripping inside the anchor-measurement
-   `useLayoutEffect`/`ResizeObserver` combo), which blanked the page.
-   Reported by the user with the full browser console stack trace. Root
-   cause and fix described in Work Completed #10 above. **Ask the user to
-   confirm this is actually resolved after applying 0010** - the fix was
-   derived from static analysis of the crash trace, not a live repro in
-   this sandbox (no browser/network access here), so treat it as
-   "should fix it" rather than "confirmed fixed" until they retest the
-   exact scenario (drag a card near/past the canvas edge, including while
-   it's expanded).
-2. A benign-looking `Failed to load resource: 404` also appeared in the
-   console alongside the crash - not yet identified (most likely an
-   unrelated favicon/asset request, could also be an artifact of the
-   crash itself interrupting the page). Not investigated since it wasn't
-   called out as a separate problem by the user; revisit if it recurs
-   independently of the crash after 0010.
+1. **[FIXED, not yet re-tested]** Canvas row-overlap - see Work Completed
+   #3. Same caveat as everything below: no live browser/MongoDB access in
+   this sandbox, so this is "should fix it," not "confirmed fixed."
+2. The benign-looking `Failed to load resource: 404` mentioned in the
+   previous chat's browser console (alongside the now-fixed boundary
+   crash) is still unidentified - not investigated this chat either,
+   since it wasn't reported as recurring independently and there's no way
+   to reproduce it without a live browser. Revisit if the user sees it
+   again after retesting.
 
 ## Debugging Already Done
 
-Problem #1 above: diagnosed from the user-supplied stack trace alone (
-`checkForNestedUpdates` -> `dispatchSetState` at `Canvas.jsx:125`, inside
-the anchor-measurement `useLayoutEffect`). Reasoned through the component
-tree statically (no live repro available in this sandbox) to find two
-compounding issues: (a) the canvas's content-box sizing only accounted for
-auto-layout positions, not manual/live-drag ones, so a dragged card could
-overflow the stated box; (b) `setAnchors` had no guard against redundant
-updates, so any resulting measure/render cycle had no circuit breaker.
-Fixed both; not yet confirmed against the user's actual browser.
+Row-overlap fix (#3 above) was diagnosed directly from `PROJECT_CONTEXT.md`'s
+own Known Issues writeup (which already correctly identified the root
+cause: fixed-estimate row spacing vs. variable expanded-card height) - not
+from a fresh repro, since none is possible here. The fix mirrors the
+existing anchor-measurement pattern in the same file as closely as
+possible, specifically to avoid introducing a new inconsistent
+measurement mechanism, and reuses the exact equality-guard technique
+(`heightsEqual`, modeled on the file's own `anchorsEqual`) that fixed the
+prior render-loop crash in diff `0010`, to avoid reintroducing that class
+of bug.
 
 ## Important Decisions Made
 
-(Full rationale already in `PROJECT_CONTEXT.md`'s "Important Decisions" -
-listed here only as a pointer, not duplicated.) Relevant ones a next chat
-should not re-litigate without cause: graph/DAG model over tree, no
-sibling edge type, MongoDB, no auth for v1, vertical top-to-bottom
-auto-layout, manual card position saves immediately while everything else
-batches on "Save", Canvas and LineageGraph deliberately share one layout
-algorithm (but not the same `NODE_W` - LineageGraph's is intentionally
-smaller/read-only-compact). New in this chat: the per-workspace deed list
-stays unpaginated on purpose (canvas needs the complete graph); a scoped
-single-field search topic uses regex rather than `$text` because Mongo's
-`$text` can't be restricted to one field of a compound text index.
+No new architectural decisions this chat - see `PROJECT_CONTEXT.md`'s
+"Important Decisions" (unchanged) for the full list. The row-overlap fix
+is a bug fix within the existing architecture (DOM-measured layout,
+shared `layout.js`), not a design change; `LineageGraph.jsx`'s read-only
+view intentionally still uses the pure fixed-estimate `layout.js` output
+without this row-height adjustment, since it has no inline-expand state to
+overlap in the first place - see Current Code/Architecture Considerations.
 
 ## Current Code/Architecture Considerations
 
-- **Diff-based delivery is still the established workflow** even though
-  this particular chat had direct file access via an uploaded zip (not
-  Claude Code) - the user wants changes as git-apply-able `.diff` files
-  regardless of how Claude read the code. Diff numbering continues from
-  `0008`; currently at `0010`.
-- The scratch working copy for this chat is `/home/claude/deed-tracker/
-  Deed-Tracker-main` (unzipped from the user's upload, then `git init`'d
-  fresh as a baseline commit) - **local to this sandbox, will not exist in
-  a new chat**. A future chat should ask the user to re-upload the zip (or
-  paste `git diff`/file contents) rather than assume the scratch repo
-  persists.
-- The user's repo is `github.com/Rounakag16/Deed-Tracker`, `main` branch.
-- Diffs `0001`-`0009` are confirmed applied (the user ran `npm install` +
-  connected to a live MongoDB successfully on that state). Diff `0010` was
-  generated in response to the crash that live test surfaced -
-  **not yet confirmed applied or re-tested as of this writing.**
-- **No live browser/network access exists in this sandbox** - diff 0010's
-  fix was derived entirely from reading the user's pasted stack trace and
-  reasoning through the component statically. This is a meaningfully
-  weaker verification standard than the rest of the codebase's own static
-  checks (syntax/JSX-parse/balance), since a logic bug like a render loop
-  can't be fully ruled out without actually running it. Treat 0010 as
-  "should fix it" until the user confirms.
+- **The row-height fix is deliberately Canvas-only, not pushed into the
+  shared `layout.js`.** `LineageGraph.jsx` (read-only) never has an
+  expanded/mid-edit card, so it has nothing to measure and no overlap
+  problem to solve - adding this complexity there would be unused code.
+  If a future feature gives the Lineage view its own variable-height
+  cards (e.g. an inline preview), revisit whether to lift this into
+  `layout.js` properly instead of duplicating it.
+- **Still no live browser/network/MongoDB access in this sandbox** -
+  identical constraint to the prior chat. This chat did get further than
+  pure manual reading by using `@babel/parser`/`node --check` for syntax
+  verification and `git apply --check` to verify the diff's mechanical
+  correctness, but none of that catches a logic or render-loop bug the
+  way actually running the app would. Diff `0011` should be treated with
+  the same "should fix it, not confirmed" caveat as diff `0010` was until
+  the user retests live.
+- **Diff-based delivery remains the workflow** even with this chat's
+  direct file access, per the user's standing requirement - continuing
+  the numbering from `0010` to `0011`.
+- The scratch working copy for this chat is `/home/claude/work/DeedTracker`
+  (unzipped from the re-uploaded zip) - local to this sandbox, will not
+  exist in a future chat. A future chat should ask for a fresh zip or
+  `git diff`/file contents rather than assume this persists.
 
 ## Pending Work
 
-From `PROJECT_CONTEXT.md`'s "Not implemented" / "Partially completed"
-lists, still open as of this chat:
-- **Re-test the canvas boundary-crash fix (diff 0010) live** - this is the
-  immediate next task. Specifically: drag a card near/past the canvas
-  edge (both collapsed and expanded), and drag it while zoomed in/out.
-- **Continue the end-to-end smoke test** from where diff 0009's crash
-  interrupted it (see Exact Next Steps in the previous entry - workspace
-  create, deed CRUD incl. blank-deed-number validation, relationship
-  wiring incl. cycle rejection, Save/reload persistence, inline edit,
-  Excel export, Lineage view, search incl. pagination) - none of that has
-  been confirmed yet, the first crash happened early.
-- Authentication (explicitly deferred, only add if the user asks)
-- Deployment/hosting setup (none exists)
-- Bulk import from the old Firebase version's data (never requested, just
-  a plausible future ask given the project's origin)
-- Format validation beyond deed number (area/plot fields are still free
-  text - not requested, noted as a possible future ask)
+- **Re-test live**, resuming exactly where the diff-`0009` smoke test was
+  interrupted by the (now-fixed) boundary crash: create a workspace → add
+  several deeds (including one with a blank deed number, to confirm
+  validation) → drag-wire converging/diverging relationships (including a
+  3-hop cycle attempt) → drag-reposition a card → **expand a card to edit
+  it while other cards sit in the same auto-layout row, to specifically
+  exercise diff `0011`'s row-overlap fix** → try pan/zoom → Save → reload
+  and confirm persistence → export to Excel → open the Lineage/View tab →
+  search (scoped and global, paginated) and click through.
+- Authentication (explicitly deferred, only add if asked).
+- Deployment/hosting setup (none exists).
+- Bulk import from the old Firebase version (never requested).
+- Format validation beyond deed number (not requested).
+- The unidentified benign 404 from the first live test (Problems/Errors
+  #2) - only worth investigating if it recurs independently.
 
 ## Exact Next Steps
 
-1. Present diff `0010` (Canvas.jsx boundary-crash fix, bundled with both
-   doc updates) to the user with exact `git apply`/`git add -A`/
-   `git commit`/`git push` instructions.
-2. Ask the user to re-run the app and specifically retry the crash
-   scenario: drag a deed card near/past the canvas edge, both collapsed
-   and expanded, and try it at different zoom levels.
-3. If that's clean, resume the original smoke-test checklist from diff
-   0009's handoff (see Pending Work above) in order, stopping at the first
-   thing that breaks: create a workspace → add several deeds (including
-   trying to save one with a blank deed number, to confirm the new
-   validation error shows cleanly) → drag-wire some converging/diverging
-   relationships (including attempting a 3-hop cycle, to confirm it's
-   rejected) → drag-reposition a card → try the pan/zoom controls → Save →
-   reload and confirm persistence → expand and edit a saved deed (confirm
-   no cursor-jump regression) → export to Excel and open the file → open
-   the Lineage/View tab → search (both scoped and global, all-topic and
-   single-topic, confirm pagination Prev/Next work once results exceed a
-   page) and click a result to confirm it navigates correctly → paginate
-   the workspace list once there are >20 workspaces (or lower `PAGE_SIZE`
-   temporarily to test with fewer).
-4. Whatever breaks next, get the **exact error message/behavior** from the
-   user and fix it as the next numbered diff (`0011`) - do not guess at
-   fixes without a concrete repro/error, the same way 0010 was diagnosed
-   from the actual stack trace rather than a guess.
-5. Once smoke-tested clean, return to the still-open backlog (auth,
-   deployment, bulk import, etc.) only as the user prioritizes them.
+1. Present diff `0011` (row-overlap fix + PUT hardening, bundled with the
+   doc updates) with exact `git apply`/`git add -A`/`git commit`/
+   `git push` instructions.
+2. Ask the user to re-run the app and specifically retry: (a) the
+   original boundary-crash drag scenario from diff `0010`, to reconfirm
+   that's still fixed, and (b) expanding a card that shares an
+   auto-layout row with another card, to confirm the row now grows
+   instead of overlapping.
+3. If that's clean, resume the full smoke-test checklist from Pending
+   Work above, stopping at the first thing that breaks.
+4. Whatever breaks next, get the exact error/behavior from the user and
+   fix it as diff `0012` - do not guess without a concrete repro, same as
+   every prior diff in this project.
+5. Once smoke-tested clean, return to the open backlog (auth, deployment,
+   bulk import) only as the user prioritizes it.
 
 ## User Requirements For The Current Task
 
 - Always deliver changes as `.diff` files (git-apply-able), never full
-  file rewrites, never assume Claude Code / direct repo access - free
-  tier, chat only, no other tools available to the user for applying
-  changes besides `git apply`.
+  file rewrites, never assume Claude Code / direct repo access.
 - Keep diff numbering sequential and continuous across the whole project
-  (currently through `0010`).
-- Give exact shell commands for applying each diff every time (the user
-  has been running the same `git apply` / `git add -A` / `git commit` /
-  `git push` sequence throughout).
+  (currently through `0011`).
+- Give exact shell commands for applying each diff every time.
 - `CHAT_STATE.md` should stay narrowly conversation-focused, not a
-  restatement of `PROJECT_CONTEXT.md` - avoid duplicating stable project
-  facts here in future updates to this file.
-- (This chat) Keep `PROJECT_CONTEXT.md` and `CHAT_STATE.md` updated
-  side-by-side with each improvement/build going forward, not just at
-  session handoff.
+  restatement of `PROJECT_CONTEXT.md`.
+- Keep `PROJECT_CONTEXT.md` and `CHAT_STATE.md` updated side-by-side with
+  each improvement/build going forward, not just at session handoff.

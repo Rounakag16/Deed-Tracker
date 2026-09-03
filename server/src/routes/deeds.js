@@ -22,9 +22,11 @@ router.get(
 // POST /api/workspaces/:workspaceId/deeds
 // Body: { deeds: [ {...deedFields} , ... ] }  -- supports creating several at once
 // (e.g. "add 5 deeds" on the canvas before wiring them together)
-// insertMany is run ordered:false with runValidators via schema (default
-// for insertMany), so a Mongoose ValidationError (e.g. missing deed
-// number) is thrown and caught by the generic error handler as a 400.
+// insertMany is run ordered:true, which validates every document up front:
+// if any deed fails validation (e.g. missing deed number), none of the
+// batch is inserted - matches the all-or-nothing batching Canvas.jsx
+// already assumes when it maps created[i] back onto draftDeeds by index.
+// The ValidationError is caught by the generic error handler as a 400.
 router.post(
   "/",
   asyncHandler(async (req, res) => {
@@ -37,13 +39,19 @@ router.post(
 );
 
 // PUT /api/workspaces/:workspaceId/deeds/:deedId
+// The client already strips _id/__v/createdAt/updatedAt/workspaceId before
+// sending an update (see Canvas.jsx's onSave), but that's a client-side
+// courtesy, not a guarantee - strip them here too so a stray/old client
+// build can't move a deed to a different workspace or overwrite its id
+// via the request body.
 router.put(
   "/:deedId",
   asyncHandler(async (req, res) => {
     const { workspaceId, deedId } = req.params;
+    const { _id, __v, createdAt, updatedAt, workspaceId: _workspaceId, ...fields } = req.body;
     const deed = await Deed.findOneAndUpdate(
       { _id: deedId, workspaceId },
-      { $set: req.body },
+      { $set: fields },
       { new: true, runValidators: true, context: "query" }
     );
     if (!deed) return res.status(404).json({ error: "Deed not found" });
