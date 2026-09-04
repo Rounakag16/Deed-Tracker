@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import DeedCard from "./DeedCard";
+import DeedSidebar from "./DeedSidebar";
 import { blankDeed } from "./DeedForm";
 import { computeLayers, computePositions } from "../layout";
 
@@ -60,6 +61,8 @@ export default function Canvas({ workspace, onView }) {
   const [error, setError] = useState("");
   const [zoom, setZoom] = useState(1);
   const [isPanning, setIsPanning] = useState(false);
+  const [selectedKey, setSelectedKey] = useState(null); // key of the card shown in the sidebar
+  const [sidebarDirty, setSidebarDirty] = useState(false); // mirrors DeedSidebar's own dirty state
 
   const draggingSourceRef = useRef(null);
   const cardDragRef = useRef(null);
@@ -84,6 +87,21 @@ export default function Canvas({ workspace, onView }) {
   const labelForKey = (key) => {
     const d = allCards.find((c) => keyFor(c) === key);
     return d ? deedLabel(d) : key;
+  };
+  // The deed shown in the sidebar. If it was deleted or a draft got saved
+  // (and so changed key), this just quietly resolves to nothing and the
+  // sidebar closes on its own - no separate cleanup needed.
+  const selectedDeed = selectedKey ? allCards.find((c) => keyFor(c) === selectedKey) : null;
+
+  // Switching the sidebar to a different (or no) card would silently throw
+  // away any unsaved edit sitting in it - confirm first, same as every
+  // other state-losing action in this file (Delete, Reset Layout).
+  const trySelect = (key) => {
+    if (sidebarDirty && selectedKey && selectedKey !== key) {
+      if (!confirm("Discard the unsaved changes on the currently selected deed?")) return;
+    }
+    setSidebarDirty(false);
+    setSelectedKey(key);
   };
 
   // Same deed number appearing on more than one deed in this workspace is
@@ -314,7 +332,10 @@ export default function Canvas({ workspace, onView }) {
 
   // Drag-to-move: mousedown anywhere on a card except its buttons/inputs/dots
   // starts repositioning it. Dots already stopPropagation() so they don't
-  // trigger this.
+  // trigger this. The same gesture doubles as "click to select": if the
+  // mouse never moves past the jitter threshold before mouseup, it's
+  // treated as a click and opens the sidebar for that card instead of
+  // committing a (zero-distance) position change - see handleUp below.
   const startCardDrag = (key, currentPos) => (e) => {
     if (e.target.closest("button, input, textarea, select")) return;
     e.preventDefault();
@@ -328,6 +349,7 @@ export default function Canvas({ workspace, onView }) {
       startMouseY: e.clientY,
       startX: currentPos.x,
       startY: currentPos.y,
+      moved: false,
     };
     setIsCardDragging(true);
   };
@@ -340,11 +362,16 @@ export default function Canvas({ workspace, onView }) {
       const dx = e.clientX - d.startMouseX;
       const dy = e.clientY - d.startMouseY;
       if (Math.hypot(dx, dy) < 3) return; // ignore tiny jitter from a plain click
+      d.moved = true;
       setLiveDragPos({ key: d.key, x: Math.max(0, d.startX + dx), y: Math.max(0, d.startY + dy) });
     };
     const handleUp = () => {
+      const d = cardDragRef.current;
       cardDragRef.current = null;
       setIsCardDragging(false);
+      if (d && !d.moved) {
+        trySelect(d.key); // plain click - open the sidebar, don't touch position
+      }
       setLiveDragPos((current) => {
         if (current) commitCardPosition(current.key, { x: current.x, y: current.y });
         return null;
@@ -406,7 +433,13 @@ export default function Canvas({ workspace, onView }) {
   };
 
   const addDraftDeed = () => {
-    setDraftDeeds((prev) => [...prev, { _tempId: nextTempId(), ...blankDeed() }]);
+    if (sidebarDirty && selectedKey) {
+      if (!confirm("Discard the unsaved changes on the currently selected deed?")) return;
+    }
+    const tempId = nextTempId();
+    setDraftDeeds((prev) => [...prev, { _tempId: tempId, ...blankDeed() }]);
+    setSidebarDirty(false);
+    setSelectedKey(tempId); // open the sidebar straight away, same as the old inline-expand-on-add did
   };
 
   const updateDraft = (tempId, next) => {
@@ -416,12 +449,23 @@ export default function Canvas({ workspace, onView }) {
   const removeDraft = (tempId) => {
     setDraftDeeds((prev) => prev.filter((d) => d._tempId !== tempId));
     setPendingEdges((prev) => prev.filter((e) => e.sourceKey !== tempId && e.targetKey !== tempId));
+    if (selectedKey === tempId) {
+      setSelectedKey(null);
+      setSidebarDirty(false);
+    }
   };
 
+  // Returns whether the deed was actually deleted, so callers (the
+  // sidebar) know whether to close themselves - confirm() can be canceled.
   const deleteSavedDeed = async (id) => {
-    if (!confirm("Delete this deed and every relationship touching it?")) return;
+    if (!confirm("Delete this deed and every relationship touching it?")) return false;
     await api.deleteDeed(workspace._id, id);
     load();
+    if (selectedKey === id) {
+      setSelectedKey(null);
+      setSidebarDirty(false);
+    }
+    return true;
   };
 
   const confirmEdgeDraft = () => {
@@ -471,8 +515,8 @@ export default function Canvas({ workspace, onView }) {
   const hasUnsaved = draftDeeds.length > 0 || pendingEdges.length > 0;
 
   return (
-    <div className="max-w-[1800px] mx-auto py-8 px-4">
-      <div className="flex flex-wrap items-center gap-3 mb-4">
+    <div className="h-full flex flex-col">
+      <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b bg-white shrink-0">
         <h2 className="text-xl font-bold">{workspace.name}</h2>
         <div className="flex-1" />
         <div className="flex items-center border rounded overflow-hidden text-sm">
@@ -526,226 +570,242 @@ export default function Canvas({ workspace, onView }) {
         )}
       </div>
 
-      <p className="text-sm text-slate-500 mb-4">
-        Drag a card to reposition it, or drag from the dot at the bottom of a deed to the dot at
-        the top of another to mark that it derives from it. Drag empty canvas background to pan,
-        and use the zoom controls above to see more of a large workspace at once. New deeds and
-        links only take effect once you click Save; a moved card's position saves immediately.
-      </p>
+      {(error || duplicateDeedNumbers.length > 0 || edgeDraft) && (
+        <div className="px-4 py-3 border-b bg-white shrink-0 space-y-3">
+          {error && <p className="text-red-600 text-sm">{error}</p>}
 
-      {error && <p className="text-red-600 mb-4">{error}</p>}
+          {duplicateDeedNumbers.length > 0 && (
+            <div className="border border-amber-400 bg-amber-50 text-amber-800 rounded p-3 text-sm">
+              <p className="font-medium mb-1">Duplicate deed number(s) in this workspace:</p>
+              <ul className="list-disc list-inside">
+                {duplicateDeedNumbers.map(([num, group]) => (
+                  <li key={num}>
+                    "{num}" used by {group.length} deeds
+                    {group.some((d) => !d._id) ? " (including an unsaved one)" : ""}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
-      {duplicateDeedNumbers.length > 0 && (
-        <div className="border border-amber-400 bg-amber-50 text-amber-800 rounded p-3 mb-4 text-sm">
-          <p className="font-medium mb-1">Duplicate deed number(s) in this workspace:</p>
-          <ul className="list-disc list-inside">
-            {duplicateDeedNumbers.map(([num, group]) => (
-              <li key={num}>
-                "{num}" used by {group.length} deeds
-                {group.some((d) => !d._id) ? " (including an unsaved one)" : ""}
-              </li>
-            ))}
-          </ul>
+          {edgeDraft && (
+            <div className="border border-blue-400 bg-blue-50 rounded p-3 text-sm">
+              <p className="mb-2">
+                <strong>{labelForKey(edgeDraft.targetKey)}</strong> derives from{" "}
+                <strong>{labelForKey(edgeDraft.sourceKey)}</strong>
+              </p>
+              <div className="flex gap-2 mb-2">
+                <input
+                  className="flex-1 border rounded px-2 py-1"
+                  placeholder="Area/share transferred (optional)"
+                  value={edgeDraft.areaTransferred}
+                  onChange={(e) => setEdgeDraft({ ...edgeDraft, areaTransferred: e.target.value })}
+                />
+                <input
+                  className="flex-1 border rounded px-2 py-1"
+                  placeholder="Note (optional)"
+                  value={edgeDraft.note}
+                  onChange={(e) => setEdgeDraft({ ...edgeDraft, note: e.target.value })}
+                />
+              </div>
+              <div className="flex gap-2">
+                <button onClick={confirmEdgeDraft} className="bg-blue-600 text-white px-3 py-1 rounded">
+                  Add this link
+                </button>
+                <button onClick={() => setEdgeDraft(null)} className="px-3 py-1">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {edgeDraft && (
-        <div className="border border-blue-400 bg-blue-50 rounded p-3 mb-4 text-sm">
-          <p className="mb-2">
-            <strong>{labelForKey(edgeDraft.targetKey)}</strong> derives from{" "}
-            <strong>{labelForKey(edgeDraft.sourceKey)}</strong>
-          </p>
-          <div className="flex gap-2 mb-2">
-            <input
-              className="flex-1 border rounded px-2 py-1"
-              placeholder="Area/share transferred (optional)"
-              value={edgeDraft.areaTransferred}
-              onChange={(e) => setEdgeDraft({ ...edgeDraft, areaTransferred: e.target.value })}
-            />
-            <input
-              className="flex-1 border rounded px-2 py-1"
-              placeholder="Note (optional)"
-              value={edgeDraft.note}
-              onChange={(e) => setEdgeDraft({ ...edgeDraft, note: e.target.value })}
-            />
+      <div className="flex-1 min-h-0 flex overflow-hidden">
+        {allCards.length === 0 ? (
+          <div className="flex-1 flex items-center justify-center text-slate-500 text-sm">
+            No deeds yet. Click "Add Deed" to start.
           </div>
-          <div className="flex gap-2">
-            <button onClick={confirmEdgeDraft} className="bg-blue-600 text-white px-3 py-1 rounded">
-              Add this link
-            </button>
-            <button onClick={() => setEdgeDraft(null)} className="px-3 py-1">
-              Cancel
-            </button>
-          </div>
-        </div>
-      )}
-
-      {allCards.length === 0 ? (
-        <p className="text-slate-500">No deeds yet. Click "Add Deed" to start.</p>
-      ) : (
-        <div
-          ref={scrollRef}
-          onMouseDown={startPan}
-          className="border rounded bg-slate-50 overflow-auto"
-          style={{ maxHeight: "calc(100vh - 200px)", cursor: isPanning ? "grabbing" : "grab" }}
-        >
-          {/* Outer sizing div matches the *scaled* content dimensions so the
-              scroll container's scrollbars/scroll range are correct at any
-              zoom level; the inner div is the actual unscaled content,
-              transformed down/up to fit. */}
+        ) : (
           <div
-            style={{
-              width: Math.max(width, 900) * zoom,
-              height: Math.max(height, 400) * zoom,
-            }}
+            ref={scrollRef}
+            onMouseDown={startPan}
+            className="flex-1 overflow-auto bg-slate-50"
+            style={{ cursor: isPanning ? "grabbing" : "grab" }}
           >
+            {/* Outer sizing div matches the *scaled* content dimensions so the
+                scroll container's scrollbars/scroll range are correct at any
+                zoom level; the inner div is the actual unscaled content,
+                transformed down/up to fit. */}
             <div
-              ref={contentRef}
               style={{
-                position: "relative",
-                width: Math.max(width, 900),
-                height: Math.max(height, 400),
-                transform: `scale(${zoom})`,
-                transformOrigin: "0 0",
+                width: Math.max(width, 900) * zoom,
+                height: Math.max(height, 400) * zoom,
               }}
             >
-              <svg
-                width={Math.max(width, 900)}
-                height={Math.max(height, 400)}
-                style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }}
+              <div
+                ref={contentRef}
+                style={{
+                  position: "relative",
+                  width: Math.max(width, 900),
+                  height: Math.max(height, 400),
+                  transform: `scale(${zoom})`,
+                  transformOrigin: "0 0",
+                }}
               >
-              <defs>
-                <marker id="arrowhead-edit" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-                  <path d="M0,0 L8,4 L0,8 Z" fill="#64748b" />
-                </marker>
-              </defs>
+                <svg
+                  width={Math.max(width, 900)}
+                  height={Math.max(height, 400)}
+                  style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }}
+                >
+                <defs>
+                  <marker id="arrowhead-edit" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                    <path d="M0,0 L8,4 L0,8 Z" fill="#64748b" />
+                  </marker>
+                </defs>
 
-              {graphEdges.map((e, i) => {
-                const a = anchors.get(e.sourceKey);
-                const b = anchors.get(e.targetKey);
-                if (!a || !b) return null;
-                const x1 = a.bottom.x,
-                  y1 = a.bottom.y;
-                const x2 = b.top.x,
-                  y2 = b.top.y;
-                const midY = (y1 + y2) / 2;
+                {graphEdges.map((e, i) => {
+                  const a = anchors.get(e.sourceKey);
+                  const b = anchors.get(e.targetKey);
+                  if (!a || !b) return null;
+                  const x1 = a.bottom.x,
+                    y1 = a.bottom.y;
+                  const x2 = b.top.x,
+                    y2 = b.top.y;
+                  const midY = (y1 + y2) / 2;
+                  return (
+                    <g key={e._id || `pending-${i}`}>
+                      <path
+                        d={`M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`}
+                        fill="none"
+                        stroke={e.saved ? "#64748b" : "#f59e0b"}
+                        strokeWidth="2"
+                        strokeDasharray={e.saved ? undefined : "5,4"}
+                        markerEnd="url(#arrowhead-edit)"
+                        style={{ pointerEvents: "stroke", cursor: "pointer" }}
+                        onClick={() =>
+                          e.saved
+                            ? deleteSavedRelationship(e._id)
+                            : removePendingEdge(e.pendingIndex)
+                        }
+                      />
+                      {e.areaTransferred && (
+                        <text
+                          x={(x1 + x2) / 2}
+                          y={midY - 4}
+                          fontSize="10"
+                          fill="#475569"
+                          textAnchor="middle"
+                          style={{ pointerEvents: "none" }}
+                        >
+                          {e.areaTransferred}
+                        </text>
+                      )}
+                    </g>
+                  );
+                })}
+
+                {isDragging &&
+                  dragPos &&
+                  (() => {
+                    const a = anchors.get(draggingSourceRef.current);
+                    if (!a) return null;
+                    const midY = (a.bottom.y + dragPos.y) / 2;
+                    return (
+                      <path
+                        d={`M ${a.bottom.x} ${a.bottom.y} C ${a.bottom.x} ${midY}, ${dragPos.x} ${midY}, ${dragPos.x} ${dragPos.y}`}
+                        fill="none"
+                        stroke="#2563eb"
+                        strokeWidth="2"
+                        strokeDasharray="4,4"
+                      />
+                    );
+                  })()}
+              </svg>
+
+              {allCards.map((deed) => {
+                const key = keyFor(deed);
+                const pos = resolvedPos(key, deed);
+                const isDraft = !deed._id;
+                if (!pos) return null;
+                const isBeingDragged = liveDragPos?.key === key;
+                const isSelected = selectedKey === key;
                 return (
-                  <g key={e._id || `pending-${i}`}>
-                    <path
-                      d={`M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`}
-                      fill="none"
-                      stroke={e.saved ? "#64748b" : "#f59e0b"}
-                      strokeWidth="2"
-                      strokeDasharray={e.saved ? undefined : "5,4"}
-                      markerEnd="url(#arrowhead-edit)"
-                      style={{ pointerEvents: "stroke", cursor: "pointer" }}
-                      onClick={() =>
-                        e.saved
-                          ? deleteSavedRelationship(e._id)
-                          : removePendingEdge(e.pendingIndex)
-                      }
+                  <div
+                    key={key}
+                    data-card-wrapper="true"
+                    ref={(el) => {
+                      if (el) wrapperRefs.current.set(key, el);
+                      else wrapperRefs.current.delete(key);
+                    }}
+                    onMouseDown={startCardDrag(key, pos)}
+                    style={{
+                      position: "absolute",
+                      left: pos.x,
+                      top: pos.y,
+                      width: NODE_W,
+                      cursor: isBeingDragged ? "grabbing" : "pointer",
+                      zIndex: isBeingDragged ? 20 : isSelected ? 10 : 1,
+                    }}
+                  >
+                    <div
+                      ref={(el) => {
+                        if (el) topDotRefs.current.set(key, el);
+                        else topDotRefs.current.delete(key);
+                      }}
+                      title="Derives from (drop a link here)"
+                      className="w-4 h-4 rounded-full bg-slate-400 border-2 border-white shadow mx-auto"
+                      style={{ position: "absolute", top: -8, left: NODE_W / 2 - 8, zIndex: 5 }}
                     />
-                    {e.areaTransferred && (
-                      <text
-                        x={(x1 + x2) / 2}
-                        y={midY - 4}
-                        fontSize="10"
-                        fill="#475569"
-                        textAnchor="middle"
-                        style={{ pointerEvents: "none" }}
-                      >
-                        {e.areaTransferred}
-                      </text>
-                    )}
-                  </g>
+
+                    <DeedCard deed={deed} isDraft={isDraft} isSelected={isSelected} />
+
+                    <div
+                      ref={(el) => {
+                        if (el) bottomDotRefs.current.set(key, el);
+                        else bottomDotRefs.current.delete(key);
+                      }}
+                      onMouseDown={startDrag(key)}
+                      title="Drag to link this deed to one derived from it"
+                      className="w-4 h-4 rounded-full bg-blue-500 border-2 border-white shadow mx-auto cursor-grab active:cursor-grabbing"
+                      style={{ position: "absolute", bottom: -8, left: NODE_W / 2 - 8, zIndex: 5 }}
+                    />
+                  </div>
                 );
               })}
-
-              {isDragging &&
-                dragPos &&
-                (() => {
-                  const a = anchors.get(draggingSourceRef.current);
-                  if (!a) return null;
-                  const midY = (a.bottom.y + dragPos.y) / 2;
-                  return (
-                    <path
-                      d={`M ${a.bottom.x} ${a.bottom.y} C ${a.bottom.x} ${midY}, ${dragPos.x} ${midY}, ${dragPos.x} ${dragPos.y}`}
-                      fill="none"
-                      stroke="#2563eb"
-                      strokeWidth="2"
-                      strokeDasharray="4,4"
-                    />
-                  );
-                })()}
-            </svg>
-
-            {allCards.map((deed) => {
-              const key = keyFor(deed);
-              const pos = resolvedPos(key, deed);
-              const isDraft = !deed._id;
-              if (!pos) return null;
-              const isBeingDragged = liveDragPos?.key === key;
-              return (
-                <div
-                  key={key}
-                  data-card-wrapper="true"
-                  ref={(el) => {
-                    if (el) wrapperRefs.current.set(key, el);
-                    else wrapperRefs.current.delete(key);
-                  }}
-                  onMouseDown={startCardDrag(key, pos)}
-                  style={{
-                    position: "absolute",
-                    left: pos.x,
-                    top: pos.y,
-                    width: NODE_W,
-                    cursor: isBeingDragged ? "grabbing" : "grab",
-                    zIndex: isBeingDragged ? 20 : 1,
-                  }}
-                >
-                  <div
-                    ref={(el) => {
-                      if (el) topDotRefs.current.set(key, el);
-                      else topDotRefs.current.delete(key);
-                    }}
-                    title="Derives from (drop a link here)"
-                    className="w-4 h-4 rounded-full bg-slate-400 border-2 border-white shadow mx-auto"
-                    style={{ position: "absolute", top: -8, left: NODE_W / 2 - 8, zIndex: 5 }}
-                  />
-
-                  <DeedCard
-                    deed={deed}
-                    isDraft={isDraft}
-                    onChange={isDraft ? (next) => updateDraft(deed._tempId, next) : undefined}
-                    onSave={
-                      !isDraft
-                        ? async (next) => {
-                            const { _id, __v, createdAt, updatedAt, workspaceId, ...fields } = next;
-                            await api.updateDeed(workspace._id, deed._id, fields);
-                            load();
-                          }
-                        : undefined
-                    }
-                    onDelete={() => (isDraft ? removeDraft(deed._tempId) : deleteSavedDeed(deed._id))}
-                  />
-
-                  <div
-                    ref={(el) => {
-                      if (el) bottomDotRefs.current.set(key, el);
-                      else bottomDotRefs.current.delete(key);
-                    }}
-                    onMouseDown={startDrag(key)}
-                    title="Drag to link this deed to one derived from it"
-                    className="w-4 h-4 rounded-full bg-blue-500 border-2 border-white shadow mx-auto cursor-grab active:cursor-grabbing"
-                    style={{ position: "absolute", bottom: -8, left: NODE_W / 2 - 8, zIndex: 5 }}
-                  />
-                </div>
-              );
-            })}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
+
+        {selectedDeed &&
+          (() => {
+            const isDraft = !selectedDeed._id;
+            return (
+              <DeedSidebar
+                key={selectedKey}
+                deed={selectedDeed}
+                isDraft={isDraft}
+                onChange={isDraft ? (next) => updateDraft(selectedDeed._tempId, next) : undefined}
+                onSave={
+                  !isDraft
+                    ? async (next) => {
+                        const { _id, __v, createdAt, updatedAt, workspaceId, ...fields } = next;
+                        await api.updateDeed(workspace._id, selectedDeed._id, fields);
+                        load();
+                      }
+                    : undefined
+                }
+                onDelete={async () => {
+                  if (isDraft) removeDraft(selectedDeed._tempId);
+                  else await deleteSavedDeed(selectedDeed._id);
+                }}
+                onDirtyChange={setSidebarDirty}
+                onClose={() => trySelect(null)}
+              />
+            );
+          })()}
+      </div>
     </div>
   );
 }

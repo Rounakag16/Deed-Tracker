@@ -1,0 +1,1498 @@
+diff --git a/CHAT_STATE.md b/CHAT_STATE.md
+index 77abbf1..bb50cc5 100644
+--- a/CHAT_STATE.md
++++ b/CHAT_STATE.md
+@@ -2,209 +2,227 @@
+ 
+ ## Current Objective
+ 
+-Fresh chat, again with direct codebase access (a re-uploaded zip, not
+-Claude Code) - the user asked to read the whole project + git history +
+-prior chat state, then fix current bugs/issues and keep building toward
+-the end goal. This chat's zip was diff `0010`'s state (confirmed: the
+-working tree matched `HEAD` exactly except for CRLF line-ending noise
+-introduced by the user's local Windows checkout, and a leftover
+-`0010-canvas-boundary-crash-fix.diff` file that had already been applied
+-and could be deleted). No new live-testing has happened since diff `0010`
+-was generated - this chat is still static-review-only (see Current
+-Code/Architecture Considerations).
+-
+-This chat produced diff `0011`, delivered below.
++Same chat as diff `0011` (direct codebase access via a re-uploaded zip,
++still using the diff-delivery workflow per the user's standing
++requirement). After `0011` shipped, the user reported it live-tested as
++still buggy: clicking a deed card made the canvas shorten (the inline
++expand-to-edit behavior resizing/reflowing the canvas), and asked for a
++redesign - card details/editing in a sidebar instead, with the canvas
++taking the rest of the page and staying independently
++scrollable/pannable/zoomable. This turn is that redesign, delivered as
++diff `0012`.
+ 
+ ## Work Completed In This Chat
+ 
+-1. **Read the full repo, `git log`, and both hand-off docs** before
+-   touching anything. Confirmed via `git diff --stat -w` that the
+-   uploaded zip's working tree matched commit `247853a` (diff `0010`)
+-   exactly aside from CRLF noise - i.e. diff `0010` is applied and
+-   committed, contrary to the prior chat's uncertainty about that.
+-2. **Attempted to actually run the app** (not just statically review it)
+-   since this chat had direct file access: `node_modules` were present for
+-   both `client` and `server`, but they were installed on Windows
+-   (`@esbuild/win32-x64`, `@rollup/rollup-win32-x64-msvc` etc., no Linux
+-   binaries) and this sandbox has no network access to fetch Linux
+-   equivalents or to install/run MongoDB - so `vite build`, `esbuild`, and
+-   any real client build all failed at the native-binary-resolution step.
+-   Fell back to `@babel/parser` (pure JS, no native binary) to
+-   syntax-check every client `.js`/`.jsx` file, and `node --check` for
+-   every server file - all clean. This is a weaker check than a real build
+-   (catches syntax errors, not type/logic bugs) but is strictly better
+-   than the pure manual-reading review prior chats were limited to.
+-3. **Fixed the Known Issues row-overlap bug** (`client/src/components/Canvas.jsx`):
+-   an expanded (mid-edit) card could visually overlap the card below it in
+-   the same auto-layout row, because row spacing used a fixed height
+-   estimate (`NODE_H_ESTIMATE`) instead of the card's real (much taller)
+-   expanded height. Fixed by extending the existing DOM-measurement
+-   pattern (the same one `recomputeAnchors`/`ResizeObserver` already use
+-   for wire endpoints) to also measure each auto-positioned card's actual
+-   rendered height (`cardHeights` state, `recomputeCardHeights`
+-   callback), then computing per-row spacing from the tallest card
+-   actually measured in that row instead of the fixed estimate. Manually
+-   positioned/mid-drag cards are excluded from the row-height calculation
+-   since they don't live in an auto-layout row. Same equality-guard
+-   pattern as the existing anchor measurement (`heightsEqual`, mirroring
+-   `anchorsEqual`) to avoid reintroducing the "Maximum update depth
+-   exceeded" render-loop class of bug that diff `0010` fixed - reasoned
+-   through carefully since there's no live browser here to catch a
+-   render-loop regression by just running it.
+-4. **Small server hardening pass** (`server/src/routes/deeds.js`), found
+-   during the same read-through:
+-   - Fixed a stale comment on the deed-creation route that said
+-     `insertMany` runs `ordered:false` when the code actually (and
+-     correctly) uses `ordered:true` - no behavior change, just corrected
+-     the comment to match the code and explain why `ordered:true` matters
+-     here (all-or-nothing batch validation, which `Canvas.jsx`'s
+-     `handleSaveAll` already assumes when it maps `created[i]` back onto
+-     `draftDeeds` by index).
+-   - The PUT deed route now strips `_id`/`__v`/`createdAt`/`updatedAt`/
+-     `workspaceId` from the request body server-side before `$set`. The
+-     client already does this (`Canvas.jsx`'s `onSave`), but that was only
+-     a client-side courtesy - a stray or old client build could otherwise
+-     move a deed to a different workspace or overwrite its id via the PUT
+-     body. Defense-in-depth, not a live bug report.
+-5. **Reviewed every other file for correctness** (`App.jsx`, `api.js`,
+-   `DeedCard.jsx`, `DeedForm.jsx`, `LineageGraph.jsx`, `SearchPanel.jsx`,
+-   `WorkspaceList.jsx`, `search.js`, `relationships.js`, `export.js`,
+-   `workspaces.js`, `server.js`, both Mongoose models) - traced the cycle
+-   BFS logic, the search pagination/text-index branching, the
+-   edit-buffering pattern, the Save/id-resolution flow, and the Lineage
+-   view's key handling. No further bugs found; nothing else changed.
+-6. **`PROJECT_CONTEXT.md`**: marked the row-overlap Known Issue `[FIXED]`
+-   with the fix description above; added a one-line note to the PUT-deed
+-   API row about the new server-side field-stripping.
+-
+-## Files Changed
+-
+-- `client/src/components/Canvas.jsx` - row-overlap fix (see #3 above):
+-  new `cardHeights` state + `recomputeCardHeights` callback +
+-  `heightsEqual` guard; `layerById` pulled out into its own memo so it's
+-  shared between the position calculation and the new row-height
+-  calculation; `positions`/`layoutHeight` (fixed-estimate) replaced by
+-  `autoPositions`/`rowLayoutHeight` (row-aware) everywhere they were used
+-  (`resolvedPos`, the content-box-growing memo from diff `0010`, the
+-  anchor-measurement effect's dependency array).
+-- `server/src/routes/deeds.js` - comment fix on POST (no behavior
+-  change) + PUT now strips protected fields from the body server-side
+-  (see #4 above).
+-- `PROJECT_CONTEXT.md` - Known Issues + API table updated to match.
+-- `CHAT_STATE.md` - this file, rewritten for this chat.
+-
+-Everything else in the repo (`server/src/models/*`, `server/src/routes/{workspaces,relationships,search,export}.js`,
+-`server/src/server.js`, `server/src/utils/*`, and every other `client/src`
+-file) is unchanged from diff `0010`'s state.
++**Diff `0011`** (previous turn, recap): row-overlap fix for expanded
++cards + PUT-hardening on the deeds route. See the diff file itself and
++`PROJECT_CONTEXT.md`'s Known Issues for detail - it's now marked
++`[SUPERSEDED]`, not reverted (see below).
++
++**Diff `0012`** (this turn): moved all deed detail/editing off the canvas
++card and into a new sidebar, per the user's explicit request. Concretely:
++
++1. **`DeedCard.jsx` rewritten** to a small, fixed-height, stateless
++   summary chip (deed number + buyer name, `isSelected` highlight border).
++   No more expand/collapse, no buttons, no local edit-buffering state -
++   all of that moved out.
++2. **New `DeedSidebar.jsx`**: the full `DeedForm` plus Save
++   changes/Discard/Delete/Close, for whichever card is currently selected.
++   Carries over the exact local-edit-buffering pattern (`localDeed`/`dirty`
++   state, re-sync from the `deed` prop only when not dirty) that used to
++   live in `DeedCard.jsx` - this pattern is load-bearing (see
++   `PROJECT_CONTEXT.md`), only its file moved. Reports its `dirty` state
++   up to `Canvas.jsx` via a new `onDirtyChange` prop.
++3. **`Canvas.jsx`**:
++   - New `selectedKey`/`sidebarDirty` state; `selectedDeed` derived from
++     `selectedKey`.
++   - `startCardDrag`'s mousedown/mousemove/mouseup handling now
++     distinguishes a plain click (mouse never moved past the existing 3px
++     jitter threshold) from an actual drag: a click calls a new
++     `trySelect(key)` to open the sidebar, instead of (as before) doing
++     nothing. A real drag still repositions the card exactly as before -
++     unrelated to diff `0010`'s crash fix or `0011`'s row-height fix, both
++     of which are untouched and still apply.
++   - `trySelect(key)` confirms before switching the sidebar to a
++     different card (or closing it, or adding a new draft) if the
++     currently-open sidebar has unsaved edits - same `confirm()` pattern
++     the file already used for Delete/Reset Layout. Without this, clicking
++     a different card while mid-edit on the previous one would have
++     silently discarded the edit, since there's only one sidebar instance
++     now (unlike the old design, where every card could be independently
++     expanded/edited at once).
++   - `addDraftDeed`/`removeDraft`/`deleteSavedDeed` updated to manage
++     `selectedKey`/`sidebarDirty` alongside their existing responsibilities
++     (new draft auto-selects and opens the sidebar, matching the old
++     auto-expand-on-add behavior; deleting the selected deed closes the
++     sidebar). `deleteSavedDeed` now returns whether it actually deleted
++     (the user can cancel the `confirm()`), used for correctness even
++     though nothing currently branches on it beyond what's already
++     handled internally.
++   - JSX layout restructured: `h-full flex flex-col` (toolbar → error/
++     banner strip → `flex-1 min-h-0 flex` row containing the scrollable/
++     pannable/zoomable canvas pane and, when a card is selected, the
++     sidebar). Card rendering in the canvas now renders the compact
++     `DeedCard` (no `onChange`/`onSave`/`onDelete` props - those moved to
++     the sidebar instance) with `isSelected` for the highlight border, and
++     cursor changed from "grab" to "pointer" on idle cards since clicking
++     now does something (select) distinct from dragging.
++4. **`App.jsx`**: changed to a `h-screen` flex-column layout (nav bar
++   `shrink-0`, active tab wrapped in `flex-1 min-h-0 overflow-auto`) so
++   the canvas tab can actually fill the remaining viewport height, which
++   `Canvas.jsx`'s new `h-full` layout needs. Search/Lineage tabs keep
++   working exactly as before - they just scroll within this wrapper now
++   instead of the whole page scrolling, no visible difference expected.
++5. **`PROJECT_CONTEXT.md`** updated throughout: repository structure
++   entry for `DeedCard.jsx`/new `DeedSidebar.jsx`, the Major
++   Features/Canvas bullet list, Important Implementation Details (buffering
++   pattern's new home + the new `sidebarDirty`/`trySelect` guard),
++   Important Decisions (new bullet explaining the redesign and why), the
++   anchor-measurement note (no longer motivated by expand/collapse, kept
++   anyway), and Known Issues (marked the row-overlap issue `[SUPERSEDED]`
++   rather than removing it, with an explanation of why `0011`'s fix was
++   left in place instead of ripped out).
++
++## Files Changed (diff `0012`)
++
++- `client/src/App.jsx` - full-height flex layout (see #4 above).
++- `client/src/components/Canvas.jsx` - selection state, click-vs-drag
++  detection, dirty-guard, JSX layout restructure (see #3 above).
++- `client/src/components/DeedCard.jsx` - rewritten to a stateless compact
++  chip (see #1 above).
++- `client/src/components/DeedSidebar.jsx` - new file (see #2 above).
++- `PROJECT_CONTEXT.md` - see #5 above.
++
++Everything else (all server files, `layout.js`, `DeedForm.jsx`,
++`LineageGraph.jsx`, `SearchPanel.jsx`, `WorkspaceList.jsx`, `api.js`) is
++unchanged from diff `0011`'s state.
+ 
+ ## Current Implementation State
+ 
+-Same live-testing status as before this chat: diffs `0001`-`0009` are
+-confirmed applied and server-side confirmed live-working (real MongoDB
+-connection); diff `0010`'s crash fix and this chat's diff `0011` are both
+-**only statically reviewed** (syntax-checked via `@babel/parser`/`node
+---check`, and diff `0011`'s patch itself was verified to `git apply
+---check` cleanly against a pristine copy of `HEAD` in this sandbox) -
+-neither has been exercised in a real browser against a real MongoDB yet.
+-The very first live smoke test (diff `0009`'s state) got as far as
+-"connect to MongoDB, hit the boundary crash" before diff `0010` was
+-written to fix that crash - the rest of the smoke-test checklist below
+-has never been run.
++Same live-testing status as before, now one layer deeper: diffs
++`0001`-`0009` are confirmed applied and were live-tested against a real
++MongoDB. Diff `0010` (crash fix) was applied and is now confirmed
++indirectly - the user's bug report this turn was about the *expand*
++behavior, not a recurrence of the boundary crash, so `0010` appears to
++still be holding. Diff `0011` (row-overlap fix) was live-tested implicitly
++too, in the sense that the user's report was specifically about the
++resulting canvas-shortens behavior it was meant to smooth over - the fix
++itself technically worked as designed (rows did grow to fit), but the
++*design* it was patching (inline expand at all) is what the user actually
++wanted gone, which is why `0011`'s row-overlap fix is marked
++`[SUPERSEDED]`, not wrong. Diff `0012` (this turn) is, like `0010` and
++`0011` before their first live test, **only statically verified** - full
++`@babel/parser` syntax check across every client file, no build/browser
++test possible in this sandbox (see Current Code/Architecture
++Considerations, unchanged constraint). The `0012` diff itself was
++verified to `git apply --check` cleanly on top of a copy of the repo with
++`0011` already applied.
+ 
+ ## Problems / Errors
+ 
+-1. **[FIXED, not yet re-tested]** Canvas row-overlap - see Work Completed
+-   #3. Same caveat as everything below: no live browser/MongoDB access in
+-   this sandbox, so this is "should fix it," not "confirmed fixed."
+-2. The benign-looking `Failed to load resource: 404` mentioned in the
+-   previous chat's browser console (alongside the now-fixed boundary
+-   crash) is still unidentified - not investigated this chat either,
+-   since it wasn't reported as recurring independently and there's no way
+-   to reproduce it without a live browser. Revisit if the user sees it
+-   again after retesting.
++1. **User-reported and now addressed by diff `0012`**: clicking a deed
++   card shrank the canvas. Root cause: the card expanded inline in place
++   to show its edit form, which grew the card's height, which (even with
++   diff `0011`'s row-height fix working correctly) still visibly
++   reflowed/resized the surrounding canvas - not what the user wanted.
++   Fix was a redesign (move editing to a sidebar), not a smaller patch -
++   see Work Completed. Not yet re-tested live.
++2. The unidentified benign `404` from the very first live test (mentioned
++   in prior `CHAT_STATE.md` revisions) is still unaddressed/unconfirmed -
++   no update this turn, still only worth investigating if the user sees it
++   again.
+ 
+ ## Debugging Already Done
+ 
+-Row-overlap fix (#3 above) was diagnosed directly from `PROJECT_CONTEXT.md`'s
+-own Known Issues writeup (which already correctly identified the root
+-cause: fixed-estimate row spacing vs. variable expanded-card height) - not
+-from a fresh repro, since none is possible here. The fix mirrors the
+-existing anchor-measurement pattern in the same file as closely as
+-possible, specifically to avoid introducing a new inconsistent
+-measurement mechanism, and reuses the exact equality-guard technique
+-(`heightsEqual`, modeled on the file's own `anchorsEqual`) that fixed the
+-prior render-loop crash in diff `0010`, to avoid reintroducing that class
+-of bug.
++The user's bug report ("canvas shortens" on click) was specific enough
++to identify the exact mechanism without needing a live repro: the
++inline-expand behavior in the pre-`0012` `DeedCard.jsx`, and diff
++`0011`'s row-height-measurement fix (which was *working as intended* -
++rows genuinely did grow instead of overlapping) was never going to
++satisfy this complaint, because growing rows still means the canvas
++visibly changes shape around the clicked card. That's why this turn was
++scoped as an interaction redesign (sidebar) rather than trying to patch
++`0011` further - no amount of row-height tuning removes the reflow the
++user was objecting to, since the reflow is inherent to editing in place
++at all.
+ 
+ ## Important Decisions Made
+ 
+-No new architectural decisions this chat - see `PROJECT_CONTEXT.md`'s
+-"Important Decisions" (unchanged) for the full list. The row-overlap fix
+-is a bug fix within the existing architecture (DOM-measured layout,
+-shared `layout.js`), not a design change; `LineageGraph.jsx`'s read-only
+-view intentionally still uses the pure fixed-estimate `layout.js` output
+-without this row-height adjustment, since it has no inline-expand state to
+-overlap in the first place - see Current Code/Architecture Considerations.
++See `PROJECT_CONTEXT.md`'s "Important Decisions" for the durable record
++(now includes this turn's sidebar-redesign bullet). One decision worth
++calling out here specifically since it's easy to second-guess in a future
++session: **diff `0011`'s row-height-measurement code in `Canvas.jsx`
++(`cardHeights`/`autoPositions`/`rowLayoutHeight`) was deliberately left in
++place**, not ripped out, even though on-canvas cards no longer expand and
++so the mechanism is now close to a no-op in practice. Reasoning: it's
++harmless (settles to a stable value immediately since card height barely
++varies now), costs nothing to keep, and still provides real robustness if
++a card's summary text content ever grows (e.g. a very long deed number
++wrapping to two lines). Don't remove it reflexively in a future cleanup
++pass without re-checking whether that reasoning still holds.
+ 
+ ## Current Code/Architecture Considerations
+ 
+-- **The row-height fix is deliberately Canvas-only, not pushed into the
+-  shared `layout.js`.** `LineageGraph.jsx` (read-only) never has an
+-  expanded/mid-edit card, so it has nothing to measure and no overlap
+-  problem to solve - adding this complexity there would be unused code.
+-  If a future feature gives the Lineage view its own variable-height
+-  cards (e.g. an inline preview), revisit whether to lift this into
+-  `layout.js` properly instead of duplicating it.
++- **Single shared sidebar, not per-card state.** Before `0012`, every
++  `DeedCard` could independently hold its own expanded/edit-buffer state,
++  so multiple cards could theoretically be "open" (expanded) at once. Now
++  there is exactly one `DeedSidebar` instance, keyed by `selectedKey`, so
++  switching selection unmounts/remounts it. This is why the
++  `sidebarDirty`/`trySelect` confirm-guard exists - it's compensating for
++  a capability the old design had "for free" (independent per-card state)
++  that the new single-sidebar design doesn't. If a future request wants
++  multiple cards editable simultaneously again, this whole guard becomes
++  unnecessary and should come back out.
+ - **Still no live browser/network/MongoDB access in this sandbox** -
+-  identical constraint to the prior chat. This chat did get further than
+-  pure manual reading by using `@babel/parser`/`node --check` for syntax
+-  verification and `git apply --check` to verify the diff's mechanical
+-  correctness, but none of that catches a logic or render-loop bug the
+-  way actually running the app would. Diff `0011` should be treated with
+-  the same "should fix it, not confirmed" caveat as diff `0010` was until
+-  the user retests live.
+-- **Diff-based delivery remains the workflow** even with this chat's
+-  direct file access, per the user's standing requirement - continuing
+-  the numbering from `0010` to `0011`.
+-- The scratch working copy for this chat is `/home/claude/work/DeedTracker`
+-  (unzipped from the re-uploaded zip) - local to this sandbox, will not
+-  exist in a future chat. A future chat should ask for a fresh zip or
+-  `git diff`/file contents rather than assume this persists.
++  unchanged constraint, carried over from every prior turn in this
++  project. Diff `0012` should be treated with the same "should fix it, not
++  confirmed" caveat diffs `0010` and `0011` were until the user retests
++  live - and this diff is a larger, more structural change than either of
++  those, so it deserves particularly careful live retesting (see Pending
++  Work/Exact Next Steps).
++- **`App.jsx`'s layout change is a real (if usually invisible) behavior
++  change for Search/Lineage too**, not just Canvas - they now scroll
++  within a `flex-1 min-h-0 overflow-auto` wrapper instead of the whole
++  page scrolling. Should look identical in practice, but call this out if
++  the user reports anything odd about scrolling on those two tabs
++  specifically, since it's a shared change underneath a Canvas-focused
++  request.
++- The scratch working copy for this chat is still
++  `/home/claude/work/DeedTracker` (plus a separate clean git checkout at
++  `/tmp/patchrepo` used purely for diff generation) - both local to this
++  sandbox, neither persists to a future chat.
+ 
+ ## Pending Work
+ 
+-- **Re-test live**, resuming exactly where the diff-`0009` smoke test was
+-  interrupted by the (now-fixed) boundary crash: create a workspace → add
+-  several deeds (including one with a blank deed number, to confirm
+-  validation) → drag-wire converging/diverging relationships (including a
+-  3-hop cycle attempt) → drag-reposition a card → **expand a card to edit
+-  it while other cards sit in the same auto-layout row, to specifically
+-  exercise diff `0011`'s row-overlap fix** → try pan/zoom → Save → reload
+-  and confirm persistence → export to Excel → open the Lineage/View tab →
+-  search (scoped and global, paginated) and click through.
++- **Re-test live**, and this time specifically exercise the new sidebar
++  flow end to end: add a deed (sidebar should open automatically) → fill
++  it in → click a different (or no) card while it's "dirty" and confirm
++  the discard-confirmation appears → select a saved deed, edit it, Save
++  changes, confirm it persists on reload → delete a deed from the sidebar
++  → confirm the canvas pane itself never visibly resizes/reflows when the
++  sidebar opens or closes → confirm pan/zoom/scroll still work with the
++  sidebar open. Then resume the rest of the original smoke-test checklist
++  (wiring relationships including a cycle attempt, Search, Lineage/View,
++  Excel export) that's been pending since diff `0009`.
+ - Authentication (explicitly deferred, only add if asked).
+ - Deployment/hosting setup (none exists).
+ - Bulk import from the old Firebase version (never requested).
+ - Format validation beyond deed number (not requested).
+-- The unidentified benign 404 from the first live test (Problems/Errors
+-  #2) - only worth investigating if it recurs independently.
++- The unidentified benign 404 from the first live test - only worth
++  investigating if it recurs independently.
+ 
+ ## Exact Next Steps
+ 
+-1. Present diff `0011` (row-overlap fix + PUT hardening, bundled with the
+-   doc updates) with exact `git apply`/`git add -A`/`git commit`/
+-   `git push` instructions.
+-2. Ask the user to re-run the app and specifically retry: (a) the
+-   original boundary-crash drag scenario from diff `0010`, to reconfirm
+-   that's still fixed, and (b) expanding a card that shares an
+-   auto-layout row with another card, to confirm the row now grows
+-   instead of overlapping.
+-3. If that's clean, resume the full smoke-test checklist from Pending
+-   Work above, stopping at the first thing that breaks.
+-4. Whatever breaks next, get the exact error/behavior from the user and
+-   fix it as diff `0012` - do not guess without a concrete repro, same as
+-   every prior diff in this project.
+-5. Once smoke-tested clean, return to the open backlog (auth, deployment,
++1. Present diff `0012` (sidebar redesign, bundled with the
++   `PROJECT_CONTEXT.md` updates) with exact `git apply`/`git add -A`/
++   `git commit`/`git push` instructions.
++2. Ask the user to re-test live, specifically the new sidebar flow (see
++   Pending Work above) - this is a bigger structural change than `0010`
++   or `0011`, so a careful pass here matters more than usual.
++3. Whatever breaks, get the exact error/behavior from the user and fix it
++   as diff `0013` - do not guess without a concrete repro, same as every
++   prior diff in this project.
++4. Once smoke-tested clean, return to the open backlog (auth, deployment,
+    bulk import) only as the user prioritizes it.
+ 
+ ## User Requirements For The Current Task
+@@ -212,7 +230,7 @@ overlap in the first place - see Current Code/Architecture Considerations.
+ - Always deliver changes as `.diff` files (git-apply-able), never full
+   file rewrites, never assume Claude Code / direct repo access.
+ - Keep diff numbering sequential and continuous across the whole project
+-  (currently through `0011`).
++  (currently through `0012`).
+ - Give exact shell commands for applying each diff every time.
+ - `CHAT_STATE.md` should stay narrowly conversation-focused, not a
+   restatement of `PROJECT_CONTEXT.md`.
+diff --git a/PROJECT_CONTEXT.md b/PROJECT_CONTEXT.md
+index 56d3606..a627a4d 100644
+--- a/PROJECT_CONTEXT.md
++++ b/PROJECT_CONTEXT.md
+@@ -85,10 +85,11 @@ before touching `Canvas.jsx`:
+ 2. Card **connector dots** (top = input/"derives from", bottom =
+    output/"derives into") are real DOM elements. Their pixel positions are
+    **measured directly via `getBoundingClientRect()`** (see
+-   `recomputeAnchors` in `Canvas.jsx`), not computed mathematically. This is
+-   deliberate: it means SVG wires stay glued to the dots correctly even
+-   though cards have variable height (collapsed vs. expanded-for-editing),
+-   without needing to track expand/collapse state in the layout math.
++   `recomputeAnchors` in `Canvas.jsx`), not computed mathematically. This
++   was originally to keep wires glued to dots as a card expanded inline
++   for editing; on-canvas cards are now fixed-height summary chips (see
++   Important Decisions), so it's no longer load-bearing for that reason,
++   but it's still the simplest correct approach and was left as-is.
+ 3. Dragging a wire between dots, or dragging a card to reposition it, both
+    work via manual `window.addEventListener("mousemove"/"mouseup", ...)`
+    during the gesture (not native HTML5 drag-and-drop, not a library).
+@@ -150,10 +151,19 @@ before touching `Canvas.jsx`:
+             ├── Canvas.jsx         THE main editing surface - node-editor
+             │                      (see Architecture above). Largest/most
+             │                      complex file in the project.
+-            ├── DeedCard.jsx       One deed's card UI: collapsed summary,
+-            │                      expand-to-edit, local-buffered edits with
+-            │                      explicit Save/Discard (see Known Issues -
+-            │                      this buffering was a deliberate bug fix)
++            ├── DeedCard.jsx       One deed's compact on-canvas summary
++            │                      chip only - click it to select it, which
++            │                      opens DeedSidebar. No edit state of its
++            │                      own (moved to DeedSidebar.jsx - see
++            │                      Important Decisions).
++            ├── DeedSidebar.jsx    Full deed detail/edit panel shown beside
++            │                      the canvas for whichever card is
++            │                      selected. Owns the local-buffered-edit
++            │                      pattern with explicit Save/Discard that
++            │                      used to live in DeedCard.jsx (see
++            │                      Important Implementation Details - this
++            │                      buffering is still load-bearing, it just
++            │                      moved files)
+             ├── DeedForm.jsx       The actual field-by-field edit form
+             │                      (purchasers/sellers/land parcels/etc) +
+             │                      exports `blankDeed()` factory used when
+@@ -268,32 +278,40 @@ client will need a login flow added ahead of `WorkspaceList.jsx`.
+ 
+ - **Workspaces** - top-level containers, one per land tract. Create,
+   rename (inline edit), delete (cascades).
+-- **Node-editor canvas** (`Canvas.jsx`) - the main deed-entry screen.
+-  - "+ Add Deed" drops a new blank, expanded card.
++- **Node-editor canvas** (`Canvas.jsx`) - the main deed-entry screen. Fills
++  the full remaining viewport height below the top nav (see Important
++  Decisions - `App.jsx` is now a `h-screen` flex layout for this); the
++  canvas pane and the sidebar (when open) sit side by side and each manage
++  their own scrolling independently.
++  - "+ Add Deed" drops a new blank draft card and immediately opens it in
++    the sidebar.
+   - Drag from a card's bottom dot to another card's top dot to mark
+     "derives from"; a small popover asks for optional area-transferred and
+     note text before the link is queued.
+-  - Cards are freely draggable to reposition; position persists per-deed
+-    immediately on drop. "Reset Layout" clears all manual positions back to
+-    auto-arrange.
+-  - Pan (drag empty background) and zoom (40%-150%, toolbar +/-/reset)
+-    on the canvas viewport, which itself is wider (max-w-1800px,
+-    viewport-relative max height) than the rest of the app's content. The
+-    viewport's content box now also grows to cover any manually-dragged
+-    card position, not just the auto-layout's own footprint - a mismatch
+-    there was the cause of a real crash caught in the first live test
+-    (see Known Issues).
++  - Cards are freely draggable to reposition (position persists per-deed
++    immediately on drop); a plain click (no movement) instead selects the
++    card and opens `DeedSidebar` - see `startCardDrag`'s click/drag
++    disambiguation in `Canvas.jsx`. "Reset Layout" clears all manual
++    positions back to auto-arrange.
++  - Pan (drag empty background) and zoom (40%-150%, toolbar +/-/reset) on
++    the canvas viewport. The viewport's content box grows to cover any
++    manually-dragged card position, not just the auto-layout's own
++    footprint - a mismatch there was the cause of a real crash caught in
++    the first live test (see Known Issues).
+   - Cards are 400px wide (`NODE_W` in `Canvas.jsx`, kept in sync with
+-    `DeedCard.jsx`'s width class) - wide enough that the land parcel
+-    editor's 3-across RS/LR/Area row doesn't crowd/overflow.
++    `DeedCard.jsx`'s width class) - a fixed-height summary chip (deed
++    number + buyer) only; clicking one opens the full form in the sidebar
++    rather than expanding the card itself (see Important Decisions).
+   - New deeds/links are drafts until "Save" is clicked (batch-commits
+     drafts then links, resolving temp ids to real ones). A save is
+     rejected server-side (and the error shown inline) if any deed is
+     missing a deed number, or any link would close a cycle.
+-  - Already-saved deeds can be expanded and edited inline; edits are
+-    buffered locally and only PUT to the server on an explicit "Save
+-    changes" click (see Known Issues / Important Implementation Details for
+-    why this matters).
++  - Selecting a card opens `DeedSidebar.jsx` beside the canvas with the
++    full form and Save/Discard/Delete/Close. For an already-saved deed,
++    edits are buffered locally and only PUT to the server on an explicit
++    "Save changes" click (see Important Implementation Details for why);
++    switching to a different card (or adding one, or closing the sidebar)
++    while an edit is unsaved asks for confirmation first.
+   - A banner warns (non-blocking) if two deeds in the workspace share the
+     same deed number.
+ - **Lineage view** (`LineageGraph.jsx`, reached via the "View" button) -
+@@ -309,25 +327,34 @@ client will need a login flow added ahead of `WorkspaceList.jsx`.
+ 
+ ## Important Implementation Details
+ 
+-- **`DeedCard.jsx`'s local edit buffering is load-bearing, not
++- **`DeedSidebar.jsx`'s local edit buffering is load-bearing, not
+   optional.** Earlier in development, saved-deed edits fired a PUT + full
+   list reload on every keystroke, which reset the input's cursor position
+   and made typing unusable. The fix: for a saved (non-draft) deed,
+-  `DeedCard` keeps its own `localDeed`/`dirty` state and only calls the
++  `DeedSidebar` keeps its own `localDeed`/`dirty` state and only calls the
+   parent's `onSave` when the user clicks "Save changes"; the parent-provided
+   `deed` prop is only re-synced into local state when not dirty (so a
+-  background reload doesn't clobber an in-progress edit). Do not "simplify"
+-  this back to a direct `onChange` → API call.
+-- **`Canvas.jsx`'s anchor measurement must stay DOM-based, not
+-  math-based.** The vertical layout math (`layout.js`) assumes a fixed
+-  estimated node height (`NODE_H_ESTIMATE`) purely for spacing between
+-  layers/columns - actual card heights vary a lot between collapsed and
+-  expanded (mid-edit) states. Wires are drawn using real
+-  `getBoundingClientRect()` measurements of the dot elements
+-  (`recomputeAnchors`), re-triggered via a `ResizeObserver` on each card
+-  wrapper plus a `useLayoutEffect`. If you change card markup, make sure
+-  the top/bottom dot `ref`s stay attached directly to the dot elements (not
+-  a wrapping element), or wire positions will be wrong.
++  background reload doesn't clobber an in-progress edit). This buffering
++  used to live in `DeedCard.jsx` before the sidebar redesign moved all
++  editing off the canvas card itself - the pattern is unchanged, only the
++  file moved. Do not "simplify" this back to a direct `onChange` → API
++  call. `Canvas.jsx` mirrors `DeedSidebar`'s dirty flag into its own
++  `sidebarDirty` state (via the `onDirtyChange` prop) purely so it can
++  confirm before silently discarding an in-progress edit when the user
++  selects a different card, adds a new deed, or closes the sidebar - see
++  `trySelect` in `Canvas.jsx`.
++- **`Canvas.jsx`'s anchor measurement stays DOM-based, not
++  math-based**, even though on-canvas cards no longer expand (see Important
++  Decisions) and so no longer vary in height much in practice. The vertical
++  layout math (`layout.js`) still only assumes a fixed estimated node
++  height (`NODE_H_ESTIMATE`) for spacing between layers/columns; wires are
++  drawn using real `getBoundingClientRect()` measurements of the dot
++  elements (`recomputeAnchors`), re-triggered via a `ResizeObserver` on
++  each card wrapper plus a `useLayoutEffect`. Left as-is deliberately -
++  it's simple, correct, and gives headroom if a card's summary text ever
++  wraps to an extra line. If you change card markup, make sure the
++  top/bottom dot `ref`s stay attached directly to the dot elements (not a
++  wrapping element), or wire positions will be wrong.
+ - **Pending (unsaved) relationship edges must carry their own index.**
+   `graphEdges` in `Canvas.jsx` tags each pending edge with `pendingIndex`
+   at map-time specifically so click-to-delete can find it again -
+@@ -376,6 +403,19 @@ client will need a login flow added ahead of `WorkspaceList.jsx`.
+   specifically so the read-only "View" mode is a faithful representation
+   of the same graph, per an explicit user request ("View" should show "a
+   read-only version of this same canvas").
++- **Deed detail/editing moved off the canvas card into a sidebar
++  (`DeedSidebar.jsx`), diff `0012`.** Originally a card expanded inline in
++  place when clicked, which grew the card and (even after diff `0011`'s
++  row-height fix) still shrank/reflowed the surrounding canvas in a way
++  the user found disruptive. Now a card is a small fixed-height summary
++  chip; clicking it selects it (highlighted border) and opens a fixed-width
++  sidebar next to the canvas with the full form and Save/Discard/Delete -
++  the canvas itself never resizes when a card is inspected. `App.jsx` was
++  changed to a `h-screen` flex layout so the canvas tab can claim the full
++  remaining viewport height (needed for the sidebar to sit at full height
++  beside a scrollable/zoomable canvas, per the user's explicit request that
++  "the canvas takes the rest of the page" and stays scrollable/zoomable
++  independent of the sidebar).
+ - **Delivery workflow**: the user is on Claude's free tier without Claude
+   Code, so all changes are delivered as git-apply-able `.diff` files rather
+   than direct repo access, built and reviewed against a local scratch copy
+@@ -415,17 +455,17 @@ client will need a login flow added ahead of `WorkspaceList.jsx`.
+ 
+ ## Known Issues
+ 
+-- **[FIXED] Expanded (mid-edit) cards could visually overlap the card
+-  below them** in the same auto-layout row, because row spacing was based
+-  on a fixed estimated node height while actual expanded height is much
+-  larger. Fixed by measuring each auto-positioned card's real rendered
+-  height (`cardHeights` in `Canvas.jsx`, populated the same
+-  ResizeObserver-based way anchor positions already were) and growing that
+-  row's spacing to fit the tallest card actually in it, pushing every row
+-  after it down. Manually positioned/mid-drag cards are excluded from this
+-  calculation since they don't live in an auto-layout row. Not yet
+-  live-confirmed (no browser access in this sandbox - see Development
+-  Conventions).
++- **[SUPERSEDED] Expanded (mid-edit) cards could visually overlap the card
++  below them** in the same auto-layout row - this was diff `0011`'s fix
++  (measuring real card height per row and growing spacing to fit). Diff
++  `0012` then moved all editing off the canvas card entirely into
++  `DeedSidebar.jsx` (see Important Decisions), so on-canvas cards are now
++  a fixed-height summary chip that never expands - the overlap this fixed
++  can no longer happen. `0011`'s row-height-measurement machinery in
++  `Canvas.jsx` (`cardHeights`/`autoPositions`/`rowLayoutHeight`) was left
++  in place rather than ripped out: it's harmless (card height is now
++  effectively constant, so it settles immediately) and still gives some
++  robustness if a card's summary text ever wraps to an extra line.
+ - **Server-side validation covers deed number only** (required + non-blank).
+   Other fields (area/plot numbers, etc.) remain free-text with no format
+   validation - by design for now, since the domain data (khatiya/plot
+@@ -505,7 +545,7 @@ Dockerfile, no CI/CD pipeline, no hosting provider chosen.
+ - Do not rename existing Deed schema fields without updating all
+   dependent files (`DeedForm.jsx`, `search.js`'s `TOPIC_FIELDS`,
+   `export.js`'s column mapping) in the same change.
+-- Preserve the local-edit-buffering pattern in `DeedCard.jsx` - do not
++- Preserve the local-edit-buffering pattern in `DeedSidebar.jsx` - do not
+   revert to direct onChange-triggers-API-call for saved-deed edits (see
+   Important Implementation Details for why).
+ - Keep `Canvas.jsx` and `LineageGraph.jsx` using the same `layout.js`
+diff --git a/client/src/App.jsx b/client/src/App.jsx
+index 956f066..9bab0a4 100644
+--- a/client/src/App.jsx
++++ b/client/src/App.jsx
+@@ -29,8 +29,8 @@ export default function App() {
+   }
+ 
+   return (
+-    <div>
+-      <div className="bg-white border-b sticky top-0 z-10">
++    <div className="h-screen flex flex-col">
++      <div className="bg-white border-b shrink-0">
+         <div className="max-w-6xl mx-auto px-4 flex items-center gap-4">
+           <button
+             onClick={() => setWorkspace(null)}
+@@ -57,17 +57,19 @@ export default function App() {
+         </div>
+       </div>
+ 
+-      {tab === "canvas" ? (
+-        <Canvas workspace={workspace} onView={() => setTab("lineage")} />
+-      ) : tab === "search" ? (
+-        <SearchPanel workspace={workspace} onSelectDeed={handleSelectSearchResult} />
+-      ) : (
+-        <LineageGraph
+-          workspace={workspace}
+-          onBack={() => setTab("canvas")}
+-          initialSelectedId={selectedDeedId}
+-        />
+-      )}
++      <div className="flex-1 min-h-0 overflow-auto">
++        {tab === "canvas" ? (
++          <Canvas workspace={workspace} onView={() => setTab("lineage")} />
++        ) : tab === "search" ? (
++          <SearchPanel workspace={workspace} onSelectDeed={handleSelectSearchResult} />
++        ) : (
++          <LineageGraph
++            workspace={workspace}
++            onBack={() => setTab("canvas")}
++            initialSelectedId={selectedDeedId}
++          />
++        )}
++      </div>
+     </div>
+   );
+ }
+diff --git a/client/src/components/Canvas.jsx b/client/src/components/Canvas.jsx
+index 0ba6354..15d7f91 100644
+--- a/client/src/components/Canvas.jsx
++++ b/client/src/components/Canvas.jsx
+@@ -1,6 +1,7 @@
+ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+ import { api } from "../api";
+ import DeedCard from "./DeedCard";
++import DeedSidebar from "./DeedSidebar";
+ import { blankDeed } from "./DeedForm";
+ import { computeLayers, computePositions } from "../layout";
+ 
+@@ -60,6 +61,8 @@ export default function Canvas({ workspace, onView }) {
+   const [error, setError] = useState("");
+   const [zoom, setZoom] = useState(1);
+   const [isPanning, setIsPanning] = useState(false);
++  const [selectedKey, setSelectedKey] = useState(null); // key of the card shown in the sidebar
++  const [sidebarDirty, setSidebarDirty] = useState(false); // mirrors DeedSidebar's own dirty state
+ 
+   const draggingSourceRef = useRef(null);
+   const cardDragRef = useRef(null);
+@@ -85,6 +88,21 @@ export default function Canvas({ workspace, onView }) {
+     const d = allCards.find((c) => keyFor(c) === key);
+     return d ? deedLabel(d) : key;
+   };
++  // The deed shown in the sidebar. If it was deleted or a draft got saved
++  // (and so changed key), this just quietly resolves to nothing and the
++  // sidebar closes on its own - no separate cleanup needed.
++  const selectedDeed = selectedKey ? allCards.find((c) => keyFor(c) === selectedKey) : null;
++
++  // Switching the sidebar to a different (or no) card would silently throw
++  // away any unsaved edit sitting in it - confirm first, same as every
++  // other state-losing action in this file (Delete, Reset Layout).
++  const trySelect = (key) => {
++    if (sidebarDirty && selectedKey && selectedKey !== key) {
++      if (!confirm("Discard the unsaved changes on the currently selected deed?")) return;
++    }
++    setSidebarDirty(false);
++    setSelectedKey(key);
++  };
+ 
+   // Same deed number appearing on more than one deed in this workspace is
+   // usually a typo (or a legitimate re-use across offices) - flag it, don't
+@@ -314,7 +332,10 @@ export default function Canvas({ workspace, onView }) {
+ 
+   // Drag-to-move: mousedown anywhere on a card except its buttons/inputs/dots
+   // starts repositioning it. Dots already stopPropagation() so they don't
+-  // trigger this.
++  // trigger this. The same gesture doubles as "click to select": if the
++  // mouse never moves past the jitter threshold before mouseup, it's
++  // treated as a click and opens the sidebar for that card instead of
++  // committing a (zero-distance) position change - see handleUp below.
+   const startCardDrag = (key, currentPos) => (e) => {
+     if (e.target.closest("button, input, textarea, select")) return;
+     e.preventDefault();
+@@ -328,6 +349,7 @@ export default function Canvas({ workspace, onView }) {
+       startMouseY: e.clientY,
+       startX: currentPos.x,
+       startY: currentPos.y,
++      moved: false,
+     };
+     setIsCardDragging(true);
+   };
+@@ -340,11 +362,16 @@ export default function Canvas({ workspace, onView }) {
+       const dx = e.clientX - d.startMouseX;
+       const dy = e.clientY - d.startMouseY;
+       if (Math.hypot(dx, dy) < 3) return; // ignore tiny jitter from a plain click
++      d.moved = true;
+       setLiveDragPos({ key: d.key, x: Math.max(0, d.startX + dx), y: Math.max(0, d.startY + dy) });
+     };
+     const handleUp = () => {
++      const d = cardDragRef.current;
+       cardDragRef.current = null;
+       setIsCardDragging(false);
++      if (d && !d.moved) {
++        trySelect(d.key); // plain click - open the sidebar, don't touch position
++      }
+       setLiveDragPos((current) => {
+         if (current) commitCardPosition(current.key, { x: current.x, y: current.y });
+         return null;
+@@ -406,7 +433,13 @@ export default function Canvas({ workspace, onView }) {
+   };
+ 
+   const addDraftDeed = () => {
+-    setDraftDeeds((prev) => [...prev, { _tempId: nextTempId(), ...blankDeed() }]);
++    if (sidebarDirty && selectedKey) {
++      if (!confirm("Discard the unsaved changes on the currently selected deed?")) return;
++    }
++    const tempId = nextTempId();
++    setDraftDeeds((prev) => [...prev, { _tempId: tempId, ...blankDeed() }]);
++    setSidebarDirty(false);
++    setSelectedKey(tempId); // open the sidebar straight away, same as the old inline-expand-on-add did
+   };
+ 
+   const updateDraft = (tempId, next) => {
+@@ -416,12 +449,23 @@ export default function Canvas({ workspace, onView }) {
+   const removeDraft = (tempId) => {
+     setDraftDeeds((prev) => prev.filter((d) => d._tempId !== tempId));
+     setPendingEdges((prev) => prev.filter((e) => e.sourceKey !== tempId && e.targetKey !== tempId));
++    if (selectedKey === tempId) {
++      setSelectedKey(null);
++      setSidebarDirty(false);
++    }
+   };
+ 
++  // Returns whether the deed was actually deleted, so callers (the
++  // sidebar) know whether to close themselves - confirm() can be canceled.
+   const deleteSavedDeed = async (id) => {
+-    if (!confirm("Delete this deed and every relationship touching it?")) return;
++    if (!confirm("Delete this deed and every relationship touching it?")) return false;
+     await api.deleteDeed(workspace._id, id);
+     load();
++    if (selectedKey === id) {
++      setSelectedKey(null);
++      setSidebarDirty(false);
++    }
++    return true;
+   };
+ 
+   const confirmEdgeDraft = () => {
+@@ -471,8 +515,8 @@ export default function Canvas({ workspace, onView }) {
+   const hasUnsaved = draftDeeds.length > 0 || pendingEdges.length > 0;
+ 
+   return (
+-    <div className="max-w-[1800px] mx-auto py-8 px-4">
+-      <div className="flex flex-wrap items-center gap-3 mb-4">
++    <div className="h-full flex flex-col">
++      <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b bg-white shrink-0">
+         <h2 className="text-xl font-bold">{workspace.name}</h2>
+         <div className="flex-1" />
+         <div className="flex items-center border rounded overflow-hidden text-sm">
+@@ -526,226 +570,242 @@ export default function Canvas({ workspace, onView }) {
+         )}
+       </div>
+ 
+-      <p className="text-sm text-slate-500 mb-4">
+-        Drag a card to reposition it, or drag from the dot at the bottom of a deed to the dot at
+-        the top of another to mark that it derives from it. Drag empty canvas background to pan,
+-        and use the zoom controls above to see more of a large workspace at once. New deeds and
+-        links only take effect once you click Save; a moved card's position saves immediately.
+-      </p>
+-
+-      {error && <p className="text-red-600 mb-4">{error}</p>}
+-
+-      {duplicateDeedNumbers.length > 0 && (
+-        <div className="border border-amber-400 bg-amber-50 text-amber-800 rounded p-3 mb-4 text-sm">
+-          <p className="font-medium mb-1">Duplicate deed number(s) in this workspace:</p>
+-          <ul className="list-disc list-inside">
+-            {duplicateDeedNumbers.map(([num, group]) => (
+-              <li key={num}>
+-                "{num}" used by {group.length} deeds
+-                {group.some((d) => !d._id) ? " (including an unsaved one)" : ""}
+-              </li>
+-            ))}
+-          </ul>
++      {(error || duplicateDeedNumbers.length > 0 || edgeDraft) && (
++        <div className="px-4 py-3 border-b bg-white shrink-0 space-y-3">
++          {error && <p className="text-red-600 text-sm">{error}</p>}
++
++          {duplicateDeedNumbers.length > 0 && (
++            <div className="border border-amber-400 bg-amber-50 text-amber-800 rounded p-3 text-sm">
++              <p className="font-medium mb-1">Duplicate deed number(s) in this workspace:</p>
++              <ul className="list-disc list-inside">
++                {duplicateDeedNumbers.map(([num, group]) => (
++                  <li key={num}>
++                    "{num}" used by {group.length} deeds
++                    {group.some((d) => !d._id) ? " (including an unsaved one)" : ""}
++                  </li>
++                ))}
++              </ul>
++            </div>
++          )}
++
++          {edgeDraft && (
++            <div className="border border-blue-400 bg-blue-50 rounded p-3 text-sm">
++              <p className="mb-2">
++                <strong>{labelForKey(edgeDraft.targetKey)}</strong> derives from{" "}
++                <strong>{labelForKey(edgeDraft.sourceKey)}</strong>
++              </p>
++              <div className="flex gap-2 mb-2">
++                <input
++                  className="flex-1 border rounded px-2 py-1"
++                  placeholder="Area/share transferred (optional)"
++                  value={edgeDraft.areaTransferred}
++                  onChange={(e) => setEdgeDraft({ ...edgeDraft, areaTransferred: e.target.value })}
++                />
++                <input
++                  className="flex-1 border rounded px-2 py-1"
++                  placeholder="Note (optional)"
++                  value={edgeDraft.note}
++                  onChange={(e) => setEdgeDraft({ ...edgeDraft, note: e.target.value })}
++                />
++              </div>
++              <div className="flex gap-2">
++                <button onClick={confirmEdgeDraft} className="bg-blue-600 text-white px-3 py-1 rounded">
++                  Add this link
++                </button>
++                <button onClick={() => setEdgeDraft(null)} className="px-3 py-1">
++                  Cancel
++                </button>
++              </div>
++            </div>
++          )}
+         </div>
+       )}
+ 
+-      {edgeDraft && (
+-        <div className="border border-blue-400 bg-blue-50 rounded p-3 mb-4 text-sm">
+-          <p className="mb-2">
+-            <strong>{labelForKey(edgeDraft.targetKey)}</strong> derives from{" "}
+-            <strong>{labelForKey(edgeDraft.sourceKey)}</strong>
+-          </p>
+-          <div className="flex gap-2 mb-2">
+-            <input
+-              className="flex-1 border rounded px-2 py-1"
+-              placeholder="Area/share transferred (optional)"
+-              value={edgeDraft.areaTransferred}
+-              onChange={(e) => setEdgeDraft({ ...edgeDraft, areaTransferred: e.target.value })}
+-            />
+-            <input
+-              className="flex-1 border rounded px-2 py-1"
+-              placeholder="Note (optional)"
+-              value={edgeDraft.note}
+-              onChange={(e) => setEdgeDraft({ ...edgeDraft, note: e.target.value })}
+-            />
+-          </div>
+-          <div className="flex gap-2">
+-            <button onClick={confirmEdgeDraft} className="bg-blue-600 text-white px-3 py-1 rounded">
+-              Add this link
+-            </button>
+-            <button onClick={() => setEdgeDraft(null)} className="px-3 py-1">
+-              Cancel
+-            </button>
++      <div className="flex-1 min-h-0 flex overflow-hidden">
++        {allCards.length === 0 ? (
++          <div className="flex-1 flex items-center justify-center text-slate-500 text-sm">
++            No deeds yet. Click "Add Deed" to start.
+           </div>
+-        </div>
+-      )}
+-
+-      {allCards.length === 0 ? (
+-        <p className="text-slate-500">No deeds yet. Click "Add Deed" to start.</p>
+-      ) : (
+-        <div
+-          ref={scrollRef}
+-          onMouseDown={startPan}
+-          className="border rounded bg-slate-50 overflow-auto"
+-          style={{ maxHeight: "calc(100vh - 200px)", cursor: isPanning ? "grabbing" : "grab" }}
+-        >
+-          {/* Outer sizing div matches the *scaled* content dimensions so the
+-              scroll container's scrollbars/scroll range are correct at any
+-              zoom level; the inner div is the actual unscaled content,
+-              transformed down/up to fit. */}
++        ) : (
+           <div
+-            style={{
+-              width: Math.max(width, 900) * zoom,
+-              height: Math.max(height, 400) * zoom,
+-            }}
++            ref={scrollRef}
++            onMouseDown={startPan}
++            className="flex-1 overflow-auto bg-slate-50"
++            style={{ cursor: isPanning ? "grabbing" : "grab" }}
+           >
++            {/* Outer sizing div matches the *scaled* content dimensions so the
++                scroll container's scrollbars/scroll range are correct at any
++                zoom level; the inner div is the actual unscaled content,
++                transformed down/up to fit. */}
+             <div
+-              ref={contentRef}
+               style={{
+-                position: "relative",
+-                width: Math.max(width, 900),
+-                height: Math.max(height, 400),
+-                transform: `scale(${zoom})`,
+-                transformOrigin: "0 0",
++                width: Math.max(width, 900) * zoom,
++                height: Math.max(height, 400) * zoom,
+               }}
+             >
+-              <svg
+-                width={Math.max(width, 900)}
+-                height={Math.max(height, 400)}
+-                style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }}
++              <div
++                ref={contentRef}
++                style={{
++                  position: "relative",
++                  width: Math.max(width, 900),
++                  height: Math.max(height, 400),
++                  transform: `scale(${zoom})`,
++                  transformOrigin: "0 0",
++                }}
+               >
+-              <defs>
+-                <marker id="arrowhead-edit" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+-                  <path d="M0,0 L8,4 L0,8 Z" fill="#64748b" />
+-                </marker>
+-              </defs>
+-
+-              {graphEdges.map((e, i) => {
+-                const a = anchors.get(e.sourceKey);
+-                const b = anchors.get(e.targetKey);
+-                if (!a || !b) return null;
+-                const x1 = a.bottom.x,
+-                  y1 = a.bottom.y;
+-                const x2 = b.top.x,
+-                  y2 = b.top.y;
+-                const midY = (y1 + y2) / 2;
+-                return (
+-                  <g key={e._id || `pending-${i}`}>
+-                    <path
+-                      d={`M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`}
+-                      fill="none"
+-                      stroke={e.saved ? "#64748b" : "#f59e0b"}
+-                      strokeWidth="2"
+-                      strokeDasharray={e.saved ? undefined : "5,4"}
+-                      markerEnd="url(#arrowhead-edit)"
+-                      style={{ pointerEvents: "stroke", cursor: "pointer" }}
+-                      onClick={() =>
+-                        e.saved
+-                          ? deleteSavedRelationship(e._id)
+-                          : removePendingEdge(e.pendingIndex)
+-                      }
+-                    />
+-                    {e.areaTransferred && (
+-                      <text
+-                        x={(x1 + x2) / 2}
+-                        y={midY - 4}
+-                        fontSize="10"
+-                        fill="#475569"
+-                        textAnchor="middle"
+-                        style={{ pointerEvents: "none" }}
+-                      >
+-                        {e.areaTransferred}
+-                      </text>
+-                    )}
+-                  </g>
+-                );
+-              })}
+-
+-              {isDragging &&
+-                dragPos &&
+-                (() => {
+-                  const a = anchors.get(draggingSourceRef.current);
+-                  if (!a) return null;
+-                  const midY = (a.bottom.y + dragPos.y) / 2;
++                <svg
++                  width={Math.max(width, 900)}
++                  height={Math.max(height, 400)}
++                  style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }}
++                >
++                <defs>
++                  <marker id="arrowhead-edit" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
++                    <path d="M0,0 L8,4 L0,8 Z" fill="#64748b" />
++                  </marker>
++                </defs>
++
++                {graphEdges.map((e, i) => {
++                  const a = anchors.get(e.sourceKey);
++                  const b = anchors.get(e.targetKey);
++                  if (!a || !b) return null;
++                  const x1 = a.bottom.x,
++                    y1 = a.bottom.y;
++                  const x2 = b.top.x,
++                    y2 = b.top.y;
++                  const midY = (y1 + y2) / 2;
+                   return (
+-                    <path
+-                      d={`M ${a.bottom.x} ${a.bottom.y} C ${a.bottom.x} ${midY}, ${dragPos.x} ${midY}, ${dragPos.x} ${dragPos.y}`}
+-                      fill="none"
+-                      stroke="#2563eb"
+-                      strokeWidth="2"
+-                      strokeDasharray="4,4"
+-                    />
++                    <g key={e._id || `pending-${i}`}>
++                      <path
++                        d={`M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`}
++                        fill="none"
++                        stroke={e.saved ? "#64748b" : "#f59e0b"}
++                        strokeWidth="2"
++                        strokeDasharray={e.saved ? undefined : "5,4"}
++                        markerEnd="url(#arrowhead-edit)"
++                        style={{ pointerEvents: "stroke", cursor: "pointer" }}
++                        onClick={() =>
++                          e.saved
++                            ? deleteSavedRelationship(e._id)
++                            : removePendingEdge(e.pendingIndex)
++                        }
++                      />
++                      {e.areaTransferred && (
++                        <text
++                          x={(x1 + x2) / 2}
++                          y={midY - 4}
++                          fontSize="10"
++                          fill="#475569"
++                          textAnchor="middle"
++                          style={{ pointerEvents: "none" }}
++                        >
++                          {e.areaTransferred}
++                        </text>
++                      )}
++                    </g>
+                   );
+-                })()}
+-            </svg>
+-
+-            {allCards.map((deed) => {
+-              const key = keyFor(deed);
+-              const pos = resolvedPos(key, deed);
+-              const isDraft = !deed._id;
+-              if (!pos) return null;
+-              const isBeingDragged = liveDragPos?.key === key;
+-              return (
+-                <div
+-                  key={key}
+-                  data-card-wrapper="true"
+-                  ref={(el) => {
+-                    if (el) wrapperRefs.current.set(key, el);
+-                    else wrapperRefs.current.delete(key);
+-                  }}
+-                  onMouseDown={startCardDrag(key, pos)}
+-                  style={{
+-                    position: "absolute",
+-                    left: pos.x,
+-                    top: pos.y,
+-                    width: NODE_W,
+-                    cursor: isBeingDragged ? "grabbing" : "grab",
+-                    zIndex: isBeingDragged ? 20 : 1,
+-                  }}
+-                >
++                })}
++
++                {isDragging &&
++                  dragPos &&
++                  (() => {
++                    const a = anchors.get(draggingSourceRef.current);
++                    if (!a) return null;
++                    const midY = (a.bottom.y + dragPos.y) / 2;
++                    return (
++                      <path
++                        d={`M ${a.bottom.x} ${a.bottom.y} C ${a.bottom.x} ${midY}, ${dragPos.x} ${midY}, ${dragPos.x} ${dragPos.y}`}
++                        fill="none"
++                        stroke="#2563eb"
++                        strokeWidth="2"
++                        strokeDasharray="4,4"
++                      />
++                    );
++                  })()}
++              </svg>
++
++              {allCards.map((deed) => {
++                const key = keyFor(deed);
++                const pos = resolvedPos(key, deed);
++                const isDraft = !deed._id;
++                if (!pos) return null;
++                const isBeingDragged = liveDragPos?.key === key;
++                const isSelected = selectedKey === key;
++                return (
+                   <div
++                    key={key}
++                    data-card-wrapper="true"
+                     ref={(el) => {
+-                      if (el) topDotRefs.current.set(key, el);
+-                      else topDotRefs.current.delete(key);
++                      if (el) wrapperRefs.current.set(key, el);
++                      else wrapperRefs.current.delete(key);
+                     }}
+-                    title="Derives from (drop a link here)"
+-                    className="w-4 h-4 rounded-full bg-slate-400 border-2 border-white shadow mx-auto"
+-                    style={{ position: "absolute", top: -8, left: NODE_W / 2 - 8, zIndex: 5 }}
+-                  />
+-
+-                  <DeedCard
+-                    deed={deed}
+-                    isDraft={isDraft}
+-                    onChange={isDraft ? (next) => updateDraft(deed._tempId, next) : undefined}
+-                    onSave={
+-                      !isDraft
+-                        ? async (next) => {
+-                            const { _id, __v, createdAt, updatedAt, workspaceId, ...fields } = next;
+-                            await api.updateDeed(workspace._id, deed._id, fields);
+-                            load();
+-                          }
+-                        : undefined
+-                    }
+-                    onDelete={() => (isDraft ? removeDraft(deed._tempId) : deleteSavedDeed(deed._id))}
+-                  />
+-
+-                  <div
+-                    ref={(el) => {
+-                      if (el) bottomDotRefs.current.set(key, el);
+-                      else bottomDotRefs.current.delete(key);
++                    onMouseDown={startCardDrag(key, pos)}
++                    style={{
++                      position: "absolute",
++                      left: pos.x,
++                      top: pos.y,
++                      width: NODE_W,
++                      cursor: isBeingDragged ? "grabbing" : "pointer",
++                      zIndex: isBeingDragged ? 20 : isSelected ? 10 : 1,
+                     }}
+-                    onMouseDown={startDrag(key)}
+-                    title="Drag to link this deed to one derived from it"
+-                    className="w-4 h-4 rounded-full bg-blue-500 border-2 border-white shadow mx-auto cursor-grab active:cursor-grabbing"
+-                    style={{ position: "absolute", bottom: -8, left: NODE_W / 2 - 8, zIndex: 5 }}
+-                  />
+-                </div>
+-              );
+-            })}
++                  >
++                    <div
++                      ref={(el) => {
++                        if (el) topDotRefs.current.set(key, el);
++                        else topDotRefs.current.delete(key);
++                      }}
++                      title="Derives from (drop a link here)"
++                      className="w-4 h-4 rounded-full bg-slate-400 border-2 border-white shadow mx-auto"
++                      style={{ position: "absolute", top: -8, left: NODE_W / 2 - 8, zIndex: 5 }}
++                    />
++
++                    <DeedCard deed={deed} isDraft={isDraft} isSelected={isSelected} />
++
++                    <div
++                      ref={(el) => {
++                        if (el) bottomDotRefs.current.set(key, el);
++                        else bottomDotRefs.current.delete(key);
++                      }}
++                      onMouseDown={startDrag(key)}
++                      title="Drag to link this deed to one derived from it"
++                      className="w-4 h-4 rounded-full bg-blue-500 border-2 border-white shadow mx-auto cursor-grab active:cursor-grabbing"
++                      style={{ position: "absolute", bottom: -8, left: NODE_W / 2 - 8, zIndex: 5 }}
++                    />
++                  </div>
++                );
++              })}
++              </div>
+             </div>
+           </div>
+-        </div>
+-      )}
++        )}
++
++        {selectedDeed &&
++          (() => {
++            const isDraft = !selectedDeed._id;
++            return (
++              <DeedSidebar
++                key={selectedKey}
++                deed={selectedDeed}
++                isDraft={isDraft}
++                onChange={isDraft ? (next) => updateDraft(selectedDeed._tempId, next) : undefined}
++                onSave={
++                  !isDraft
++                    ? async (next) => {
++                        const { _id, __v, createdAt, updatedAt, workspaceId, ...fields } = next;
++                        await api.updateDeed(workspace._id, selectedDeed._id, fields);
++                        load();
++                      }
++                    : undefined
++                }
++                onDelete={async () => {
++                  if (isDraft) removeDraft(selectedDeed._tempId);
++                  else await deleteSavedDeed(selectedDeed._id);
++                }}
++                onDirtyChange={setSidebarDirty}
++                onClose={() => trySelect(null)}
++              />
++            );
++          })()}
++      </div>
+     </div>
+   );
+ }
+diff --git a/client/src/components/DeedCard.jsx b/client/src/components/DeedCard.jsx
+index fed6ab9..2376272 100644
+--- a/client/src/components/DeedCard.jsx
++++ b/client/src/components/DeedCard.jsx
+@@ -1,116 +1,26 @@
+-import { useEffect, useState } from "react";
+-import DeedForm from "./DeedForm";
+-
+-export default function DeedCard({
+-  deed,
+-  isDraft,
+-  onChange, // used for drafts: fires on every keystroke, kept in memory only (cheap)
+-  onSave, // used for saved deeds: only called when the user clicks Save
+-  onDelete,
+-}) {
+-  const [expanded, setExpanded] = useState(isDraft);
+-
+-  // Saved deeds buffer edits locally so typing doesn't PUT + reload on
+-  // every keystroke. Only synced back to `deed` prop when not dirty, so a
+-  // background reload doesn't clobber in-progress edits.
+-  const [localDeed, setLocalDeed] = useState(deed);
+-  const [dirty, setDirty] = useState(false);
+-  const [savingLocal, setSavingLocal] = useState(false);
+-
+-  useEffect(() => {
+-    if (!dirty) setLocalDeed(deed);
+-  }, [deed, dirty]);
+-
+-  const displayDeed = isDraft ? deed : localDeed;
+-
+-  const handleFormChange = (next) => {
+-    if (isDraft) {
+-      onChange(next);
+-    } else {
+-      setLocalDeed(next);
+-      setDirty(true);
+-    }
+-  };
+-
+-  const handleSaveClick = async () => {
+-    setSavingLocal(true);
+-    try {
+-      await onSave(localDeed);
+-      setDirty(false);
+-    } finally {
+-      setSavingLocal(false);
+-    }
+-  };
+-
+-  const handleDiscardClick = () => {
+-    setLocalDeed(deed);
+-    setDirty(false);
+-  };
+-
+-  const summary =
+-    displayDeed.deedInfo?.deedNumber || (isDraft ? "(unsaved deed)" : "(no deed no.)");
+-  const buyer = displayDeed.purchasers?.[0]?.name;
++// Compact on-canvas summary only - clicking a card (handled by the parent
++// wrapper's drag/click logic in Canvas.jsx) selects it and opens
++// DeedSidebar for full details/editing. This card no longer expands
++// inline or owns any edit state itself; see DeedSidebar.jsx for that
++// (moved there so opening a card's details doesn't resize the card and
++// throw off the surrounding auto-layout - see PROJECT_CONTEXT.md).
++export default function DeedCard({ deed, isDraft, isSelected }) {
++  const summary = deed.deedInfo?.deedNumber || (isDraft ? "(unsaved deed)" : "(no deed no.)");
++  const buyer = deed.purchasers?.[0]?.name;
+ 
+   return (
+     // Width must stay in sync with Canvas.jsx's NODE_W constant - the
+     // wrapper positioning (dot centering, layout math) assumes this card is
+-    // exactly that wide. Bumped from 320px (w-80) to 400px so the land
+-    // parcel editor's 3-across input rows (RS/LR/Area) have room and don't
+-    // visually overflow the card.
+-    <div className="w-[400px] border rounded-lg bg-white shadow-sm p-3">
+-      <div className="flex items-start justify-between">
+-        <div>
+-          <p className="font-semibold">
+-            {summary} {isDraft && <span className="text-amber-600 text-xs">(unsaved)</span>}
+-          </p>
+-          {buyer && <p className="text-xs text-slate-500">Buyer: {buyer}</p>}
+-        </div>
+-        <div className="flex gap-2">
+-          <button
+-            className="text-xs text-blue-600 hover:underline"
+-            onClick={(e) => {
+-              e.stopPropagation();
+-              setExpanded((v) => !v);
+-            }}
+-          >
+-            {expanded ? "Collapse" : "Edit"}
+-          </button>
+-          <button
+-            className="text-xs text-red-600 hover:underline"
+-            onClick={(e) => {
+-              e.stopPropagation();
+-              onDelete();
+-            }}
+-          >
+-            Delete
+-          </button>
+-        </div>
+-      </div>
+-
+-      {expanded && (
+-        <div className="mt-3 border-t pt-3">
+-          <DeedForm deed={displayDeed} onChange={handleFormChange} />
+-          {!isDraft && dirty && (
+-            <div className="flex gap-2 mt-2">
+-              <button
+-                type="button"
+-                className="bg-green-600 text-white text-xs px-3 py-1 rounded"
+-                onClick={handleSaveClick}
+-                disabled={savingLocal}
+-              >
+-                {savingLocal ? "Saving…" : "Save changes"}
+-              </button>
+-              <button
+-                type="button"
+-                className="text-xs px-3 py-1 border rounded"
+-                onClick={handleDiscardClick}
+-              >
+-                Discard
+-              </button>
+-            </div>
+-          )}
+-        </div>
+-      )}
++    // exactly that wide.
++    <div
++      className={`w-[400px] border rounded-lg bg-white shadow-sm p-3 select-none ${
++        isSelected ? "border-blue-500 ring-2 ring-blue-200" : ""
++      }`}
++    >
++      <p className="font-semibold truncate">
++        {summary} {isDraft && <span className="text-amber-600 text-xs">(unsaved)</span>}
++      </p>
++      {buyer && <p className="text-xs text-slate-500 truncate">Buyer: {buyer}</p>}
+     </div>
+   );
+ }
+diff --git a/client/src/components/DeedSidebar.jsx b/client/src/components/DeedSidebar.jsx
+new file mode 100644
+index 0000000..3746f95
+--- /dev/null
++++ b/client/src/components/DeedSidebar.jsx
+@@ -0,0 +1,106 @@
++import { useEffect, useState } from "react";
++import DeedForm from "./DeedForm";
++
++// Full deed detail/edit panel, shown alongside the canvas when a card is
++// selected. This owns the same local-edit-buffering pattern DeedCard.jsx
++// used to own before inline expand was removed: for a saved (non-draft)
++// deed, edits are kept in local state and only PUT to the server on an
++// explicit "Save changes" click, so typing doesn't trigger a PUT + reload
++// on every keystroke (see PROJECT_CONTEXT.md's Important Implementation
++// Details - this buffering is load-bearing, don't simplify it away). For
++// a draft (unsaved) deed, edits fire onChange immediately - cheap, since
++// they're only held in memory until the batch "Save" on the canvas.
++export default function DeedSidebar({ deed, isDraft, onChange, onSave, onDelete, onClose, onDirtyChange }) {
++  const [localDeed, setLocalDeed] = useState(deed);
++  const [dirty, setDirty] = useState(false);
++  const [saving, setSaving] = useState(false);
++
++  useEffect(() => {
++    if (!dirty) setLocalDeed(deed);
++  }, [deed, dirty]);
++
++  useEffect(() => {
++    onDirtyChange?.(dirty);
++  }, [dirty, onDirtyChange]);
++
++  const displayDeed = isDraft ? deed : localDeed;
++
++  const handleFormChange = (next) => {
++    if (isDraft) {
++      onChange(next);
++    } else {
++      setLocalDeed(next);
++      setDirty(true);
++    }
++  };
++
++  const handleSaveClick = async () => {
++    setSaving(true);
++    try {
++      await onSave(localDeed);
++      setDirty(false);
++    } finally {
++      setSaving(false);
++    }
++  };
++
++  const handleDiscardClick = () => {
++    setLocalDeed(deed);
++    setDirty(false);
++  };
++
++  const summary =
++    displayDeed.deedInfo?.deedNumber || (isDraft ? "(unsaved deed)" : "(no deed no.)");
++  const buyer = displayDeed.purchasers?.[0]?.name;
++
++  return (
++    <div className="w-96 shrink-0 border-l bg-white flex flex-col">
++      <div className="flex items-start justify-between p-4 border-b shrink-0">
++        <div className="min-w-0">
++          <p className="font-semibold truncate">
++            {summary} {isDraft && <span className="text-amber-600 text-xs">(unsaved)</span>}
++          </p>
++          {buyer && <p className="text-xs text-slate-500 truncate">Buyer: {buyer}</p>}
++          {!isDraft && dirty && <p className="text-xs text-amber-600 mt-0.5">Unsaved changes</p>}
++        </div>
++        <button
++          onClick={onClose}
++          className="text-slate-400 hover:text-slate-700 text-sm shrink-0 ml-2"
++          title="Close"
++        >
++          ✕
++        </button>
++      </div>
++
++      <div className="flex-1 min-h-0 overflow-y-auto p-4">
++        <DeedForm deed={displayDeed} onChange={handleFormChange} />
++      </div>
++
++      <div className="flex items-center gap-2 p-4 border-t shrink-0">
++        {!isDraft && dirty && (
++          <>
++            <button
++              type="button"
++              className="bg-green-600 text-white text-sm px-3 py-1.5 rounded"
++              onClick={handleSaveClick}
++              disabled={saving}
++            >
++              {saving ? "Saving…" : "Save changes"}
++            </button>
++            <button
++              type="button"
++              className="text-sm px-3 py-1.5 border rounded"
++              onClick={handleDiscardClick}
++            >
++              Discard
++            </button>
++          </>
++        )}
++        <div className="flex-1" />
++        <button type="button" className="text-red-600 text-sm hover:underline" onClick={onDelete}>
++          Delete
++        </button>
++      </div>
++    </div>
++  );
++}

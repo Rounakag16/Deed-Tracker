@@ -85,10 +85,11 @@ before touching `Canvas.jsx`:
 2. Card **connector dots** (top = input/"derives from", bottom =
    output/"derives into") are real DOM elements. Their pixel positions are
    **measured directly via `getBoundingClientRect()`** (see
-   `recomputeAnchors` in `Canvas.jsx`), not computed mathematically. This is
-   deliberate: it means SVG wires stay glued to the dots correctly even
-   though cards have variable height (collapsed vs. expanded-for-editing),
-   without needing to track expand/collapse state in the layout math.
+   `recomputeAnchors` in `Canvas.jsx`), not computed mathematically. This
+   was originally to keep wires glued to dots as a card expanded inline
+   for editing; on-canvas cards are now fixed-height summary chips (see
+   Important Decisions), so it's no longer load-bearing for that reason,
+   but it's still the simplest correct approach and was left as-is.
 3. Dragging a wire between dots, or dragging a card to reposition it, both
    work via manual `window.addEventListener("mousemove"/"mouseup", ...)`
    during the gesture (not native HTML5 drag-and-drop, not a library).
@@ -150,10 +151,19 @@ before touching `Canvas.jsx`:
             ├── Canvas.jsx         THE main editing surface - node-editor
             │                      (see Architecture above). Largest/most
             │                      complex file in the project.
-            ├── DeedCard.jsx       One deed's card UI: collapsed summary,
-            │                      expand-to-edit, local-buffered edits with
-            │                      explicit Save/Discard (see Known Issues -
-            │                      this buffering was a deliberate bug fix)
+            ├── DeedCard.jsx       One deed's compact on-canvas summary
+            │                      chip only - click it to select it, which
+            │                      opens DeedSidebar. No edit state of its
+            │                      own (moved to DeedSidebar.jsx - see
+            │                      Important Decisions).
+            ├── DeedSidebar.jsx    Full deed detail/edit panel shown beside
+            │                      the canvas for whichever card is
+            │                      selected. Owns the local-buffered-edit
+            │                      pattern with explicit Save/Discard that
+            │                      used to live in DeedCard.jsx (see
+            │                      Important Implementation Details - this
+            │                      buffering is still load-bearing, it just
+            │                      moved files)
             ├── DeedForm.jsx       The actual field-by-field edit form
             │                      (purchasers/sellers/land parcels/etc) +
             │                      exports `blankDeed()` factory used when
@@ -268,32 +278,40 @@ client will need a login flow added ahead of `WorkspaceList.jsx`.
 
 - **Workspaces** - top-level containers, one per land tract. Create,
   rename (inline edit), delete (cascades).
-- **Node-editor canvas** (`Canvas.jsx`) - the main deed-entry screen.
-  - "+ Add Deed" drops a new blank, expanded card.
+- **Node-editor canvas** (`Canvas.jsx`) - the main deed-entry screen. Fills
+  the full remaining viewport height below the top nav (see Important
+  Decisions - `App.jsx` is now a `h-screen` flex layout for this); the
+  canvas pane and the sidebar (when open) sit side by side and each manage
+  their own scrolling independently.
+  - "+ Add Deed" drops a new blank draft card and immediately opens it in
+    the sidebar.
   - Drag from a card's bottom dot to another card's top dot to mark
     "derives from"; a small popover asks for optional area-transferred and
     note text before the link is queued.
-  - Cards are freely draggable to reposition; position persists per-deed
-    immediately on drop. "Reset Layout" clears all manual positions back to
-    auto-arrange.
-  - Pan (drag empty background) and zoom (40%-150%, toolbar +/-/reset)
-    on the canvas viewport, which itself is wider (max-w-1800px,
-    viewport-relative max height) than the rest of the app's content. The
-    viewport's content box now also grows to cover any manually-dragged
-    card position, not just the auto-layout's own footprint - a mismatch
-    there was the cause of a real crash caught in the first live test
-    (see Known Issues).
+  - Cards are freely draggable to reposition (position persists per-deed
+    immediately on drop); a plain click (no movement) instead selects the
+    card and opens `DeedSidebar` - see `startCardDrag`'s click/drag
+    disambiguation in `Canvas.jsx`. "Reset Layout" clears all manual
+    positions back to auto-arrange.
+  - Pan (drag empty background) and zoom (40%-150%, toolbar +/-/reset) on
+    the canvas viewport. The viewport's content box grows to cover any
+    manually-dragged card position, not just the auto-layout's own
+    footprint - a mismatch there was the cause of a real crash caught in
+    the first live test (see Known Issues).
   - Cards are 400px wide (`NODE_W` in `Canvas.jsx`, kept in sync with
-    `DeedCard.jsx`'s width class) - wide enough that the land parcel
-    editor's 3-across RS/LR/Area row doesn't crowd/overflow.
+    `DeedCard.jsx`'s width class) - a fixed-height summary chip (deed
+    number + buyer) only; clicking one opens the full form in the sidebar
+    rather than expanding the card itself (see Important Decisions).
   - New deeds/links are drafts until "Save" is clicked (batch-commits
     drafts then links, resolving temp ids to real ones). A save is
     rejected server-side (and the error shown inline) if any deed is
     missing a deed number, or any link would close a cycle.
-  - Already-saved deeds can be expanded and edited inline; edits are
-    buffered locally and only PUT to the server on an explicit "Save
-    changes" click (see Known Issues / Important Implementation Details for
-    why this matters).
+  - Selecting a card opens `DeedSidebar.jsx` beside the canvas with the
+    full form and Save/Discard/Delete/Close. For an already-saved deed,
+    edits are buffered locally and only PUT to the server on an explicit
+    "Save changes" click (see Important Implementation Details for why);
+    switching to a different card (or adding one, or closing the sidebar)
+    while an edit is unsaved asks for confirmation first.
   - A banner warns (non-blocking) if two deeds in the workspace share the
     same deed number.
 - **Lineage view** (`LineageGraph.jsx`, reached via the "View" button) -
@@ -309,25 +327,34 @@ client will need a login flow added ahead of `WorkspaceList.jsx`.
 
 ## Important Implementation Details
 
-- **`DeedCard.jsx`'s local edit buffering is load-bearing, not
+- **`DeedSidebar.jsx`'s local edit buffering is load-bearing, not
   optional.** Earlier in development, saved-deed edits fired a PUT + full
   list reload on every keystroke, which reset the input's cursor position
   and made typing unusable. The fix: for a saved (non-draft) deed,
-  `DeedCard` keeps its own `localDeed`/`dirty` state and only calls the
+  `DeedSidebar` keeps its own `localDeed`/`dirty` state and only calls the
   parent's `onSave` when the user clicks "Save changes"; the parent-provided
   `deed` prop is only re-synced into local state when not dirty (so a
-  background reload doesn't clobber an in-progress edit). Do not "simplify"
-  this back to a direct `onChange` → API call.
-- **`Canvas.jsx`'s anchor measurement must stay DOM-based, not
-  math-based.** The vertical layout math (`layout.js`) assumes a fixed
-  estimated node height (`NODE_H_ESTIMATE`) purely for spacing between
-  layers/columns - actual card heights vary a lot between collapsed and
-  expanded (mid-edit) states. Wires are drawn using real
-  `getBoundingClientRect()` measurements of the dot elements
-  (`recomputeAnchors`), re-triggered via a `ResizeObserver` on each card
-  wrapper plus a `useLayoutEffect`. If you change card markup, make sure
-  the top/bottom dot `ref`s stay attached directly to the dot elements (not
-  a wrapping element), or wire positions will be wrong.
+  background reload doesn't clobber an in-progress edit). This buffering
+  used to live in `DeedCard.jsx` before the sidebar redesign moved all
+  editing off the canvas card itself - the pattern is unchanged, only the
+  file moved. Do not "simplify" this back to a direct `onChange` → API
+  call. `Canvas.jsx` mirrors `DeedSidebar`'s dirty flag into its own
+  `sidebarDirty` state (via the `onDirtyChange` prop) purely so it can
+  confirm before silently discarding an in-progress edit when the user
+  selects a different card, adds a new deed, or closes the sidebar - see
+  `trySelect` in `Canvas.jsx`.
+- **`Canvas.jsx`'s anchor measurement stays DOM-based, not
+  math-based**, even though on-canvas cards no longer expand (see Important
+  Decisions) and so no longer vary in height much in practice. The vertical
+  layout math (`layout.js`) still only assumes a fixed estimated node
+  height (`NODE_H_ESTIMATE`) for spacing between layers/columns; wires are
+  drawn using real `getBoundingClientRect()` measurements of the dot
+  elements (`recomputeAnchors`), re-triggered via a `ResizeObserver` on
+  each card wrapper plus a `useLayoutEffect`. Left as-is deliberately -
+  it's simple, correct, and gives headroom if a card's summary text ever
+  wraps to an extra line. If you change card markup, make sure the
+  top/bottom dot `ref`s stay attached directly to the dot elements (not a
+  wrapping element), or wire positions will be wrong.
 - **Pending (unsaved) relationship edges must carry their own index.**
   `graphEdges` in `Canvas.jsx` tags each pending edge with `pendingIndex`
   at map-time specifically so click-to-delete can find it again -
@@ -376,6 +403,19 @@ client will need a login flow added ahead of `WorkspaceList.jsx`.
   specifically so the read-only "View" mode is a faithful representation
   of the same graph, per an explicit user request ("View" should show "a
   read-only version of this same canvas").
+- **Deed detail/editing moved off the canvas card into a sidebar
+  (`DeedSidebar.jsx`), diff `0012`.** Originally a card expanded inline in
+  place when clicked, which grew the card and (even after diff `0011`'s
+  row-height fix) still shrank/reflowed the surrounding canvas in a way
+  the user found disruptive. Now a card is a small fixed-height summary
+  chip; clicking it selects it (highlighted border) and opens a fixed-width
+  sidebar next to the canvas with the full form and Save/Discard/Delete -
+  the canvas itself never resizes when a card is inspected. `App.jsx` was
+  changed to a `h-screen` flex layout so the canvas tab can claim the full
+  remaining viewport height (needed for the sidebar to sit at full height
+  beside a scrollable/zoomable canvas, per the user's explicit request that
+  "the canvas takes the rest of the page" and stays scrollable/zoomable
+  independent of the sidebar).
 - **Delivery workflow**: the user is on Claude's free tier without Claude
   Code, so all changes are delivered as git-apply-able `.diff` files rather
   than direct repo access, built and reviewed against a local scratch copy
@@ -415,17 +455,17 @@ client will need a login flow added ahead of `WorkspaceList.jsx`.
 
 ## Known Issues
 
-- **[FIXED] Expanded (mid-edit) cards could visually overlap the card
-  below them** in the same auto-layout row, because row spacing was based
-  on a fixed estimated node height while actual expanded height is much
-  larger. Fixed by measuring each auto-positioned card's real rendered
-  height (`cardHeights` in `Canvas.jsx`, populated the same
-  ResizeObserver-based way anchor positions already were) and growing that
-  row's spacing to fit the tallest card actually in it, pushing every row
-  after it down. Manually positioned/mid-drag cards are excluded from this
-  calculation since they don't live in an auto-layout row. Not yet
-  live-confirmed (no browser access in this sandbox - see Development
-  Conventions).
+- **[SUPERSEDED] Expanded (mid-edit) cards could visually overlap the card
+  below them** in the same auto-layout row - this was diff `0011`'s fix
+  (measuring real card height per row and growing spacing to fit). Diff
+  `0012` then moved all editing off the canvas card entirely into
+  `DeedSidebar.jsx` (see Important Decisions), so on-canvas cards are now
+  a fixed-height summary chip that never expands - the overlap this fixed
+  can no longer happen. `0011`'s row-height-measurement machinery in
+  `Canvas.jsx` (`cardHeights`/`autoPositions`/`rowLayoutHeight`) was left
+  in place rather than ripped out: it's harmless (card height is now
+  effectively constant, so it settles immediately) and still gives some
+  robustness if a card's summary text ever wraps to an extra line.
 - **Server-side validation covers deed number only** (required + non-blank).
   Other fields (area/plot numbers, etc.) remain free-text with no format
   validation - by design for now, since the domain data (khatiya/plot
@@ -505,7 +545,7 @@ Dockerfile, no CI/CD pipeline, no hosting provider chosen.
 - Do not rename existing Deed schema fields without updating all
   dependent files (`DeedForm.jsx`, `search.js`'s `TOPIC_FIELDS`,
   `export.js`'s column mapping) in the same change.
-- Preserve the local-edit-buffering pattern in `DeedCard.jsx` - do not
+- Preserve the local-edit-buffering pattern in `DeedSidebar.jsx` - do not
   revert to direct onChange-triggers-API-call for saved-deed edits (see
   Important Implementation Details for why).
 - Keep `Canvas.jsx` and `LineageGraph.jsx` using the same `layout.js`

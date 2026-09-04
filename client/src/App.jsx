@@ -29,8 +29,8 @@ export default function App() {
   }
 
   return (
-    <div>
-      <div className="bg-white border-b sticky top-0 z-10">
+    <div className="h-screen flex flex-col">
+      <div className="bg-white border-b shrink-0">
         <div className="max-w-6xl mx-auto px-4 flex items-center gap-4">
           <button
             onClick={() => setWorkspace(null)}
@@ -57,17 +57,19 @@ export default function App() {
         </div>
       </div>
 
-      {tab === "canvas" ? (
-        <Canvas workspace={workspace} onView={() => setTab("lineage")} />
-      ) : tab === "search" ? (
-        <SearchPanel workspace={workspace} onSelectDeed={handleSelectSearchResult} />
-      ) : (
-        <LineageGraph
-          workspace={workspace}
-          onBack={() => setTab("canvas")}
-          initialSelectedId={selectedDeedId}
-        />
-      )}
+      <div className="flex-1 min-h-0 overflow-auto">
+        {tab === "canvas" ? (
+          <Canvas workspace={workspace} onView={() => setTab("lineage")} />
+        ) : tab === "search" ? (
+          <SearchPanel workspace={workspace} onSelectDeed={handleSelectSearchResult} />
+        ) : (
+          <LineageGraph
+            workspace={workspace}
+            onBack={() => setTab("canvas")}
+            initialSelectedId={selectedDeedId}
+          />
+        )}
+      </div>
     </div>
   );
 }
