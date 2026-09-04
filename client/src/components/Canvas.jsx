@@ -245,10 +245,27 @@ export default function Canvas({ workspace, onView }) {
     setCardHeights((prev) => (heightsEqual(prev, next) ? prev : next));
   }, []);
 
+  // Two separate effects on purpose, not one: recomputeAnchors reacts to
+  // autoPositions changing (so wires follow rows that grew/shrank), but
+  // recomputeCardHeights must NOT be in that same effect, because
+  // autoPositions is *derived from* cardHeights (via the memo above) - if
+  // this effect's deps included autoPositions, every cardHeights update
+  // would re-run this same effect, which measures heights again and can
+  // set cardHeights again, which changes autoPositions again... a real
+  // "Maximum update depth exceeded" loop, not just a spurious one the
+  // equality guards catch (confirmed live - see PROJECT_CONTEXT.md Known
+  // Issues). recomputeCardHeights only needs to run when the set of
+  // rendered cards changes (mount, add/remove) - the ResizeObserver below
+  // already independently catches a genuine size change to an existing
+  // card via the browser's own native resize signal, with no React
+  // dependency-cycle risk.
   useLayoutEffect(() => {
     recomputeAnchors();
+  }, [recomputeAnchors, autoPositions, liveDragPos, savedDeeds, draftDeeds]);
+
+  useLayoutEffect(() => {
     recomputeCardHeights();
-  }, [recomputeAnchors, recomputeCardHeights, autoPositions, liveDragPos, savedDeeds, draftDeeds]);
+  }, [recomputeCardHeights, allKeys]);
 
   useEffect(() => {
     const handleResize = () => {

@@ -455,6 +455,25 @@ client will need a login flow added ahead of `WorkspaceList.jsx`.
 
 ## Known Issues
 
+- **[FIXED] Canvas crashed with "Maximum update depth exceeded" on load,
+  reintroduced by diff `0011`, fixed by diff `0013`.** `0011` put
+  `recomputeCardHeights` (which sets `cardHeights`) in the same
+  `useLayoutEffect` as `recomputeAnchors`, keyed on `autoPositions` -  but
+  `autoPositions` is itself derived from `cardHeights`, so every
+  `cardHeights` update re-ran the effect that could update `cardHeights`
+  again. The per-update equality guards (`heightsEqual`) reduce spurious
+  loops but don't prevent a genuine one where successive real DOM
+  measurements legitimately differ pass to pass (confirmed live by the
+  user - blank page, console showed the classic React nested-update
+  error). Fixed by splitting into two effects:
+  `recomputeAnchors` still reacts to `autoPositions` (needed, so wires
+  follow rows that grew/shrank), but `recomputeCardHeights` now only runs
+  when the rendered card set changes (`allKeys`) - it no longer has any
+  dependency on its own derived output, so the cycle is structurally
+  impossible now, not just guarded against. The existing `ResizeObserver`
+  (unchanged) independently catches a genuine size change to an existing
+  card via the browser's native resize signal, with no React
+  dependency-cycle risk either way.
 - **[SUPERSEDED] Expanded (mid-edit) cards could visually overlap the card
   below them** in the same auto-layout row - this was diff `0011`'s fix
   (measuring real card height per row and growing spacing to fit). Diff
