@@ -1,0 +1,1450 @@
+diff --git a/CHAT_STATE.md b/CHAT_STATE.md
+index 4d7ad4b..3ec39ce 100644
+--- a/CHAT_STATE.md
++++ b/CHAT_STATE.md
+@@ -2,144 +2,158 @@
+ 
+ ## Current Objective
+ 
+-New chat session (zip re-uploaded fresh; no continuity of prior chat
+-context beyond what's written in this file and PROJECT_CONTEXT.md). Goal
+-for this session, per the user: review the codebase, then plan and build
+-whatever's needed to move DeedTracker toward a finished product. Two
+-decisions were settled before work started:
+-
+-1. **Visual direction**: redesign toward a dark "data-flow" aesthetic (see
+-   PROJECT_CONTEXT.md's Important Decisions for the dribbble.com
+-   reference and how it maps onto the existing Canvas/Sidebar structure).
+-2. **Priority order** (Claude's recommendation, user agreed): audit/fix
+-   first, then the visual redesign. Deployment was explicitly
+-   deprioritized by the user ("don't worry about deployment, we have a
+-   lot of time"). Delivery method: sticking with `.diff` files (cheaper
+-   in tokens than full-file rewrites, matches the existing numbered
+-   sequence).
++Same session as diff `0014` (zip re-uploaded fresh at the start of this
++chat; see PROJECT_CONTEXT.md for the two decisions that framed the whole
++session - dark "data-flow" visual direction, audit-before-redesign
++ordering, deployment deprioritized). This entry covers diff `0015`: the
++actual visual redesign, done after the user reacted to two check-in
++mockups (a static HTML preview, then a corrected one after the user
++pointed out the connector wires weren't touching the cards) and gave the
++go-ahead to build it for real.
+ 
+ ## Work Completed In This Chat
+ 
+-**Repo verification**: the re-uploaded zip's working tree showed nearly
+-every file as "modified" in `git status`. Diagnosed as pure CRLF-vs-LF
+-noise (the zip has CRLF line endings, the git blobs are LF) - not real
+-content drift. Fixed locally with `git config core.autocrlf false` +
+-`git checkout -- .`, confirmed clean afterward. The code is exactly
+-commit `0dec3c5` (diff `0013`, the render-loop crash fix) - nothing lost
+-or drifted since the last session.
+-
+-**Security note (not a code change)**: `server/.env` in the zip contains
+-a live MongoDB Atlas connection string with real credentials. Confirmed
+-via `git log --all --full-history` that `.env` was never committed
+-(`.gitignore` correctly excludes it) - not leaked in the repo/GitHub.
+-Flagged to the user directly in chat as a heads-up (don't share this zip
+-around; rotate the password if in doubt), no fix needed in the repo
+-itself.
+-
+-**Full static audit** (this is diff `0014`): read every route file and
+-every component (not just ones recent diffs touched), specifically to
+-close out the "never live-tested" backlog items from the last session
+-(relationships/cycles, search, export, lineage view). Also unit-tested
+-the pure logic that doesn't need a live DB/browser, with standalone Node
+-scripts run in this sandbox:
+-- `layout.js`'s `computeLayers`/`computePositions` - tested a
+-  converging+diverging graph, an empty graph, an isolated node, and a
+-  dangling parent reference (a relationship pointing at a deed not in the
+-  current id set). All correct, no changes needed.
+-- Found and fixed two real issues (see PROJECT_CONTEXT.md's Known Issues
+-  for full detail, since these are permanent project-level facts, not
+-  just this-chat facts):
+-  1. `search.js`'s field-scoped search built a `RegExp` directly from raw
+-     user input - crashes (500) on inputs that are invalid as regex
+-     (`45(a`, `khatiya[12`, `*5`, etc.), which are plausible real inputs
+-     in this domain (khatiya/plot numbers, decimal areas) and *especially*
+-     plausible mid-typing in a live search box. Fixed by escaping regex
+-     metacharacters before constructing the `RegExp`. Verified with a
+-     standalone script showing the exact same inputs throw before the fix
+-     and don't after, and still match sensibly.
+-  2. `export.js`'s `findRootAncestors` recursion had no cycle guard - not
+-     reachable through normal use (cycles are rejected at write time) but
+-     unbounded recursion into somehow-inconsistent data would crash the
+-     whole export. Added the same `visiting`-set guard `layout.js` already
+-     uses elsewhere. Verified with a script confirming a deliberately
+-     cyclic input graph returns gracefully (no stack overflow) and normal
+-     converging/diverging graphs produce identical output to before.
+-- Everything else read (Canvas.jsx's drag/save/anchor-measurement logic,
+-  relationships.js's cycle-prevention BFS, DeedSidebar.jsx's edit-
+-  buffering, DeedForm.jsx, WorkspaceList.jsx, App.jsx, all models) checked
+-  out correct on static review - no further changes made. In particular,
+-  Express's router-mounting order in `server.js` (workspacesRouter mounted
+-  at a prefix that nested routers' full paths also fall under) was
+-  double-checked for a route-collision bug and confirmed safe: `/:id`
+-  only matches a single path segment, so requests like
+-  `/api/workspaces/:id/deeds` correctly fall through to the nested router.
+-
+-## Files Changed (diff `0014`)
+-
+-- `server/src/routes/search.js` - added `escapeRegex()`, used it when
+-  building the field-scoped search `RegExp`.
+-- `server/src/routes/export.js` - added a `visiting` Set param to
+-  `findRootAncestors` as a cycle guard.
+-- `PROJECT_CONTEXT.md` - two new Known Issues entries (both marked
+-  `[FIXED]`), a note in Current Project Status about this session's audit,
+-  and a new Important Decisions entry recording the visual-direction
+-  choice and priority ordering.
++**Diff `0014`** (search regex fix + export cycle-guard) - see the entry
++already recorded in this file's prior version / PROJECT_CONTEXT.md's
++Known Issues. Unchanged, already delivered.
++
++**Design check-in before touching the real codebase**: built a standalone
++HTML mockup (not part of the app, a throwaway preview file) of the dark
++"data-flow" direction, grounded in the land-deed-ledger subject matter
++specifically to avoid the generic "near-black + one neon accent" look -
++see PROJECT_CONTEXT.md's Important Decisions for the palette/font
++reasoning. First version had hand-guessed SVG wire coordinates that didn't
++actually touch the card edges - the user caught this. Fixed by measuring
++real DOM anchor positions with a small script (the same technique
++`Canvas.jsx` already uses for the real app) instead of guessing pixel
++values. User confirmed the corrected version looked right and asked for
++the real functionality to be preserved, not just the look.
++
++**Diff `0015` - the actual redesign**, applied directly to the client
++codebase:
++- `tailwind.config.js` - added the theme's color tokens (`canvas`,
++  `surface`/`surface-raised`, `border`/`border-strong`,
++  `ink`/`ink-muted`/`ink-faint`, `brass`/`brass-soft`, `verdigris`,
++  `brick`) and font families (`serif`: Fraunces, `sans`: Inter,
++  overriding the Tailwind defaults).
++- `index.html` - Google Fonts `<link>` tags for Fraunces + Inter.
++- `src/index.css` - base `body` styles now use the new tokens.
++- Every component restyled (`App.jsx`, `Canvas.jsx`, `DeedCard.jsx`,
++  `DeedSidebar.jsx`, `DeedForm.jsx`, `LineageGraph.jsx`,
++  `WorkspaceList.jsx`, `SearchPanel.jsx`) - swapped every `slate-`/
++  `blue-`/`red-`/`green-`/`amber-`/`bg-white` class for the new tokens,
++  confirmed with a repo-wide grep afterward that none were left anywhere
++  in `client/src`.
++- `Canvas.jsx`'s SVG wires got a second, wider/blurred/translucent copy
++  of each path underneath the real one for a glow effect, plus a second
++  arrowhead marker so saved (brass-soft) vs. pending (brass) edges are
++  visually distinct the way the pre-redesign gray/amber distinction used
++  to work. `LineageGraph.jsx`'s read-only view got the equivalent
++  treatment (no glow there, just the color/font swap, since that view
++  doesn't have the pending/saved distinction to preserve).
++- `DeedCard.jsx` gained a left accent bar (via a `before:` pseudo-element,
++  not a real DOM node) - brass for an unsaved draft, verdigris for
++  selected, faint gray otherwise. Deed numbers render in Fraunces
++  (serif) everywhere; everything else stayed in Inter (sans).
++- This was a pure restyle: no state, handlers, props, or logic changed
++  anywhere. Verified two ways: (1) diffed every edited file against its
++  pre-redesign version and confirmed only `className`/color/font lines
++  differ; (2) syntax-checked every touched `.jsx` file with
++  `@babel/parser` (see below for why not a real build).
++
++**Build tooling investigation**: tried to actually run `npm run build`
++before/after the redesign to catch real errors. `client/node_modules` is
++present in the zip (nice), but it's a **Windows (win32-x64) install** -
++`rollup`'s and `esbuild`'s native binaries don't run in this Linux
++sandbox (`Cannot find module @rollup/rollup-linux-x64-gnu`, and a
++matching esbuild platform-mismatch error). No network here to install the
++Linux binaries either. Landed on `@babel/parser` (present transitively as
++a dependency of `@vitejs/plugin-react`, pure JS, no native binary) as a
++syntax checker instead - real, but not equivalent to an actual browser
++render. This is now recorded in PROJECT_CONTEXT.md's Partially Completed
++section for future sessions. On the user's own Windows machine,
++`npm run build` should work normally - this is purely a sandbox
++limitation, not a problem with the code or the zip.
++
++## Files Changed (diff `0015`)
++
++`client/tailwind.config.js`, `client/index.html`, `client/src/index.css`,
++`client/src/App.jsx`, `client/src/components/Canvas.jsx`,
++`client/src/components/DeedCard.jsx`,
++`client/src/components/DeedSidebar.jsx`,
++`client/src/components/DeedForm.jsx`,
++`client/src/components/LineageGraph.jsx`,
++`client/src/components/WorkspaceList.jsx`,
++`client/src/components/SearchPanel.jsx`, plus `PROJECT_CONTEXT.md`.
+ 
+ ## Current Implementation State
+ 
+-Diffs `0001`-`0013` unchanged from last session (see PROJECT_CONTEXT.md).
+-Diff `0014` (this session) is verified two ways that weren't available
+-for most prior diffs: standalone unit tests of the exact changed logic
+-(not just static read-through), run directly in this sandbox with Node -
+-higher confidence than a typical unverified diff, though still not a live
+-end-to-end app test (no live browser/network/MongoDB access in this
+-sandbox - same standing constraint as every prior session).
++Diffs `0001`-`0014` unchanged. Diff `0015` (this entry) restyles the
++entire client to the dark "data-flow" theme with zero logic changes -
++every feature that worked before diff `0015` should work identically
++after it (same handlers, same state, same API calls), just rendered
++differently. Not yet confirmed in an actual browser (see build tooling
++note above) - static/diff-based verification only.
+ 
+ ## Problems / Errors
+ 
+-None outstanding from this session. The two bugs found by the audit were
+-fixed within the same turn (see Work Completed above).
++None outstanding. The mockup's misaligned-wires issue (user-reported) was
++fixed within the same turn it was raised, before the real redesign
++started - see Work Completed above.
+ 
+ ## Debugging Already Done
+ 
+-See "Full static audit" under Work Completed above for the two real bugs
+-found and how each was verified (standalone Node scripts, not a live
+-repro - none was needed since these were found by reading + testing pure
+-logic in isolation, not by chasing a reported crash).
++- Mockup wire misalignment: root-caused to hand-guessed SVG coordinates
++  (compounded by a stretched `viewBox` that would've drifted further at
++  different widths) - fixed by measuring real DOM anchor points, same
++  technique the real `Canvas.jsx` uses.
++- Build tooling: root-caused the `npm run build` failure to a Windows-
++  built `node_modules` running on Linux, not a code problem - see above.
+ 
+ ## Important Decisions Made
+ 
+-See PROJECT_CONTEXT.md's Important Decisions for the two lasting ones
+-(visual direction, audit-before-redesign ordering) - recorded there since
+-they're permanent project facts, not just this-chat context.
++See PROJECT_CONTEXT.md's Important Decisions for the lasting ones (visual
++direction, color/font token choices and why, audit-before-redesign
++ordering) - recorded there since they're permanent project facts.
+ 
+ ## Current Code/Architecture Considerations
+ 
+-- No architecture changes this session - diff `0014` is two narrowly
+-  scoped correctness fixes, not a refactor.
+-- The dark redesign (next phase) is expected to touch `Canvas.jsx`,
+-  `DeedCard.jsx`, `DeedSidebar.jsx`, `LineageGraph.jsx`, `WorkspaceList.jsx`,
+-  `App.jsx`, and `tailwind.config.js` / `index.css` for a dark palette -
+-  i.e. most of the client, but per PROJECT_CONTEXT.md's Important
+-  Decisions, expected to be styling/color/connector-rendering changes
+-  layered onto the existing component structure, not a rearchitecture.
+-- Still no live browser/network/MongoDB access in this sandbox - unchanged
+-  constraint, carried over from every prior session.
++- No architecture changes in diff `0015` either - purely `className`/CSS/
++  font/color changes layered onto the existing component structure and
++  handlers.
++- The `DeedCard.jsx` left accent bar is implemented as a `before:`
++  pseudo-element (Tailwind arbitrary-value + pseudo-element variant
++  syntax), not a real DOM node - worth knowing if it ever needs to be
++  measured/targeted by a ref, since pseudo-elements aren't part of the
++  DOM tree.
++- SVG `stroke`/`fill` colors are hardcoded hex constants at the top of
++  `Canvas.jsx` and `LineageGraph.jsx` (mirroring `tailwind.config.js`'s
++  values) rather than Tailwind utility classes - same pattern the
++  pre-redesign code already used for SVG colors, kept for consistency and
++  to avoid depending on Tailwind's arbitrary-color-utility generation for
++  something unverifiable without a real build.
++- Still no live browser/network/MongoDB access in this sandbox, and now
++  more specifically: no working local build/dev-server either (see Build
++  tooling investigation above) - unchanged/clarified constraint.
+ - The scratch working copy for this chat (`/home/claude/work/DeedTracker`)
+-  is local to this sandbox and won't persist to a future chat - a fresh
+-  zip re-upload will be needed next time, as before.
++  is local to this sandbox and won't persist to a future chat.
+ 
+ ## Pending Work
+ 
+-- **The dark "data-flow" visual redesign** - next up this session.
+-- **Live re-test**, whenever the user runs the app against their real
+-  MongoDB instance: start with the diff `0013` crash fix (still not
+-  confirmed live as of this session), then the diff `0014` fixes, then
+-  the original smoke-test checklist (relationships/cycles, Search,
+-  Lineage/View, Excel export) that's been pending since diff `0009`.
++- **Live re-test, whenever the user runs the app** - this is now more
++  important than ever, since diff `0015` has never been seen rendered in
++  an actual browser. Start with: does `npm run build` (or `npm run dev`)
++  work on the user's machine at all (it should - Windows `node_modules`,
++  Windows machine); does the dark theme render as intended; do Fraunces/
++  Inter actually load (Google Fonts, needs internet - should be a non-
++  issue for a normal browser, but worth confirming); then the same
++  functional smoke-test checklist that's been pending since diff `0009`
++  (relationships/cycles, Search, Lineage/View, Excel export), now also
++  checking diff `0013`'s crash fix and diff `0014`'s two fixes, none of
++  which have been confirmed live yet either.
+ - Authentication (explicitly deferred, only add if asked).
+-- Deployment/hosting setup (explicitly deprioritized this session - "we
+-  have a lot of time").
++- Deployment/hosting setup (explicitly deprioritized - "we have a lot of
++  time").
+ - Bulk import from the old Firebase version (never requested).
+ - Format validation beyond deed number (not requested).
+ - The unidentified benign 404 from the first live test, several sessions
+@@ -148,27 +162,31 @@ they're permanent project facts, not just this-chat context.
+ 
+ ## Exact Next Steps
+ 
+-1. Present diff `0014` (search-regex fix + export cycle-guard, bundled
+-   with the PROJECT_CONTEXT.md updates) with exact `git apply`/`git
+-   add -A`/`git commit`/`git push` instructions, noting it applies after
+-   `0013`.
+-2. Move into the dark "data-flow" visual redesign - likely its own
+-   diff(s), numbered `0015` onward.
+-3. Once the user has a chance to run the app live, get real bug reports
+-   (ideally with console stack traces, as instructed previously - that
+-   made diff `0013` far faster/more precise than guessing would have)
+-   and fix as they come in.
++1. Present diff `0015` (the full redesign, bundled with the
++   PROJECT_CONTEXT.md update) with exact `git apply`/`git add -A`/
++   `git commit`/`git push` instructions, noting it applies after `0014`.
++2. Strongly encourage an actual live run before anything else - this diff
++   is the least-verified one yet (styling-only, but untested in a real
++   browser, on top of three still-unconfirmed-live fixes from `0013`/
++   `0014`).
++3. Fix whatever the user reports from that live run - ideally with exact
++   repro steps and, for anything visual, a screenshot (this is a design-
++   heavy diff, so screenshots will matter more than usual for this round
++   of feedback).
+ 
+ ## User Requirements For The Current Task
+ 
+ - Always deliver changes as `.diff` files (git-apply-able), never full
+   file rewrites, never assume Claude Code / direct repo access.
+ - Keep diff numbering sequential and continuous across the whole project
+-  (currently through `0014`).
++  (currently through `0015`).
+ - Give exact shell commands for applying each diff every time.
+ - `CHAT_STATE.md` should stay narrowly conversation-focused, not a
+   restatement of `PROJECT_CONTEXT.md`.
+ - Keep `PROJECT_CONTEXT.md` and `CHAT_STATE.md` updated side-by-side with
+   each improvement/build going forward, not just at session handoff.
+-- Visual direction: dark "data-flow" redesign (see PROJECT_CONTEXT.md).
+-- Priority: audit/fix before redesign; deployment deprioritized for now.
++- Visual direction: dark "data-flow" redesign (see PROJECT_CONTEXT.md) -
++  delivered in diff `0015`, user has not yet seen it live.
++- Priority: audit/fix before redesign (done); deployment deprioritized
++  for now; functionality must be preserved, not just the look (explicit
++  ask before diff `0015` started).
+diff --git a/PROJECT_CONTEXT.md b/PROJECT_CONTEXT.md
+index c51d86d..c3ed9d1 100644
+--- a/PROJECT_CONTEXT.md
++++ b/PROJECT_CONTEXT.md
+@@ -451,6 +451,20 @@ client will need a login flow added ahead of `WorkspaceList.jsx`.
+ - Two-sheet Excel export with root-ancestor tracing
+ - Consistent error handling: async route errors are caught and Mongoose
+   validation/cast errors surface as clean 400s instead of hanging or 500ing
++- **Dark "data-flow" visual redesign (diff `0015`)** - the light Tailwind
++  UI was replaced across every client component (`Canvas.jsx`,
++  `DeedCard.jsx`, `DeedSidebar.jsx`, `DeedForm.jsx`, `LineageGraph.jsx`,
++  `WorkspaceList.jsx`, `SearchPanel.jsx`, `App.jsx`) with the palette/font
++  tokens defined in `tailwind.config.js` (`canvas`, `surface`, `border`,
++  `ink`, `brass`, `verdigris`, `brick`; Fraunces for deed numbers/headings,
++  Inter for UI chrome, both loaded via Google Fonts in `index.html`).
++  Wires got a soft glow duplicate-path treatment; each `DeedCard` has a
++  left accent bar (brass = unsaved draft, verdigris = selected, faint =
++  default) that also doubles as a future per-status/per-workspace color
++  hook if wanted. See Important Decisions above for the color/font
++  reasoning. This was a pure restyle - no component's logic, state, or
++  handlers changed; verified by diffing every edited file against its
++  pre-redesign version.
+ 
+ **Partially completed:**
+ - No automated tests exist anywhere in the repo (manual/static review only,
+@@ -463,6 +477,18 @@ client will need a login flow added ahead of `WorkspaceList.jsx`.
+   fixes below) with standalone Node scripts. This is real verification of
+   that logic in isolation, but still not the same as a live end-to-end
+   pass - see Known Issues for what it found/fixed.
++- **`client/node_modules` in the uploaded zip is a Windows (win32-x64)
++  install**, so `rollup`'s and `esbuild`'s native binaries don't run in
++  this (Linux) sandbox - `npm run build` / `vite build` / `vite dev`
++  can't actually execute here, same as every prior session's "no live
++  browser" constraint, just now root-caused precisely. Diff `0015`'s
++  redesign was instead syntax-verified with `@babel/parser` directly
++  (pure JS, ships as a dependency of `@vitejs/plugin-react`, no native
++  binary needed) against every `.jsx` file touched, and every edit to an
++  existing file was diffed against the pre-edit version to confirm only
++  `className`/color/font lines changed, not logic - real verification,
++  but still not the same as an actual rendered browser check. On the
++  user's own (Windows) machine, `npm run build` should work normally.
+ 
+ **Not implemented:**
+ - Authentication/authorization (explicitly deferred, see Important
+@@ -472,9 +498,6 @@ client will need a login flow added ahead of `WorkspaceList.jsx`.
+   deprioritized by the user for now ("we have a lot of time")
+ - Bulk import (e.g. migrating data out of the old Firebase version)
+ - Any confirmation/undo beyond native `confirm()` dialogs
+-- **Dark "data-flow" visual redesign** - chosen this session (inspired by
+-  a dribbble.com reference the user shared) as the target look for the
+-  canvas/node UI, but not yet built. See Important Decisions.
+ 
+ ## Known Issues
+ 
+diff --git a/client/index.html b/client/index.html
+index 560791f..23162f3 100644
+--- a/client/index.html
++++ b/client/index.html
+@@ -4,6 +4,12 @@
+     <meta charset="UTF-8" />
+     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+     <title>DeedTracker</title>
++    <link rel="preconnect" href="https://fonts.googleapis.com" />
++    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
++    <link
++      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap"
++      rel="stylesheet"
++    />
+   </head>
+   <body>
+     <div id="root"></div>
+diff --git a/client/src/App.jsx b/client/src/App.jsx
+index 9bab0a4..fcd920c 100644
+--- a/client/src/App.jsx
++++ b/client/src/App.jsx
+@@ -30,18 +30,18 @@ export default function App() {
+ 
+   return (
+     <div className="h-screen flex flex-col">
+-      <div className="bg-white border-b shrink-0">
++      <div className="bg-surface border-b border-border shrink-0">
+         <div className="max-w-6xl mx-auto px-4 flex items-center gap-4">
+           <button
+             onClick={() => setWorkspace(null)}
+-            className="text-sm text-slate-500 hover:underline py-3"
++            className="text-sm text-ink-faint hover:text-ink-muted py-3"
+           >
+             ← All workspaces
+           </button>
+           <button
+             onClick={() => setTab("canvas")}
+             className={`py-3 border-b-2 text-sm px-2 ${
+-              tab === "canvas" ? "border-slate-900 font-medium" : "border-transparent text-slate-500"
++              tab === "canvas" ? "border-brass font-medium text-ink" : "border-transparent text-ink-muted hover:text-ink"
+             }`}
+           >
+             Workspace
+@@ -49,7 +49,7 @@ export default function App() {
+           <button
+             onClick={() => setTab("search")}
+             className={`py-3 border-b-2 text-sm px-2 ${
+-              tab === "search" ? "border-slate-900 font-medium" : "border-transparent text-slate-500"
++              tab === "search" ? "border-brass font-medium text-ink" : "border-transparent text-ink-muted hover:text-ink"
+             }`}
+           >
+             Search
+diff --git a/client/src/components/Canvas.jsx b/client/src/components/Canvas.jsx
+index 6fd5308..e457f25 100644
+--- a/client/src/components/Canvas.jsx
++++ b/client/src/components/Canvas.jsx
+@@ -8,6 +8,15 @@ import { computeLayers, computePositions } from "../layout";
+ let tempIdCounter = 0;
+ const nextTempId = () => `draft_${++tempIdCounter}`;
+ 
++// SVG stroke/fill colors, hardcoded to match tailwind.config.js's dark
++// theme palette exactly (Tailwind's stroke-color utilities don't cover
++// dynamically-chosen colors here, so these mirror the config values
++// directly - same pattern the pre-redesign code used with raw hex).
++const WIRE_SAVED = "#a9723a"; // brass-soft
++const WIRE_PENDING = "#c98a3b"; // brass
++const WIRE_LIVE_DRAG = "#4f9a8c"; // verdigris
++const WIRE_LABEL = "#8d94a3"; // ink-muted
++
+ function deedLabel(deed) {
+   const num = deed.deedInfo?.deedNumber || "(no deed no.)";
+   const buyer = deed.purchasers?.[0]?.name || "";
+@@ -532,22 +541,22 @@ export default function Canvas({ workspace, onView }) {
+   const hasUnsaved = draftDeeds.length > 0 || pendingEdges.length > 0;
+ 
+   return (
+-    <div className="h-full flex flex-col">
+-      <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b bg-white shrink-0">
+-        <h2 className="text-xl font-bold">{workspace.name}</h2>
++    <div className="h-full flex flex-col bg-canvas text-ink">
++      <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-border bg-surface shrink-0">
++        <h2 className="text-xl font-semibold font-serif">{workspace.name}</h2>
+         <div className="flex-1" />
+-        <div className="flex items-center border rounded overflow-hidden text-sm">
++        <div className="flex items-center border border-border rounded overflow-hidden text-sm">
+           <button
+             onClick={zoomOut}
+             disabled={zoom <= MIN_ZOOM}
+-            className="px-2 py-1.5 hover:bg-slate-100 disabled:opacity-40"
++            className="px-2 py-1.5 text-ink-muted hover:bg-surface-raised disabled:opacity-40"
+             title="Zoom out"
+           >
+             −
+           </button>
+           <button
+             onClick={zoomReset}
+-            className="px-2 py-1.5 border-x hover:bg-slate-100 w-14"
++            className="px-2 py-1.5 border-x border-border text-ink-muted hover:bg-surface-raised w-14"
+             title="Reset zoom"
+           >
+             {Math.round(zoom * 100)}%
+@@ -555,24 +564,30 @@ export default function Canvas({ workspace, onView }) {
+           <button
+             onClick={zoomIn}
+             disabled={zoom >= MAX_ZOOM}
+-            className="px-2 py-1.5 hover:bg-slate-100 disabled:opacity-40"
++            className="px-2 py-1.5 text-ink-muted hover:bg-surface-raised disabled:opacity-40"
+             title="Zoom in"
+           >
+             +
+           </button>
+         </div>
+-        <button onClick={addDraftDeed} className="bg-slate-900 text-white px-3 py-1.5 rounded text-sm">
++        <button onClick={addDraftDeed} className="bg-brass text-canvas font-medium px-3 py-1.5 rounded text-sm">
+           + Add Deed
+         </button>
+-        <button onClick={onView} className="border border-slate-900 px-3 py-1.5 rounded text-sm">
++        <button
++          onClick={onView}
++          className="border border-border-strong text-ink px-3 py-1.5 rounded text-sm hover:bg-surface-raised"
++        >
+           View
+         </button>
+-        <button onClick={resetLayout} className="border border-slate-400 text-slate-600 px-3 py-1.5 rounded text-sm">
++        <button
++          onClick={resetLayout}
++          className="border border-border text-ink-muted px-3 py-1.5 rounded text-sm hover:text-ink hover:bg-surface-raised"
++        >
+           Reset Layout
+         </button>
+         <a
+           href={api.exportWorkspaceUrl(workspace._id)}
+-          className="border border-green-700 text-green-700 px-3 py-1.5 rounded text-sm"
++          className="border border-verdigris text-verdigris px-3 py-1.5 rounded text-sm hover:bg-surface-raised"
+         >
+           Export to Excel
+         </a>
+@@ -580,7 +595,7 @@ export default function Canvas({ workspace, onView }) {
+           <button
+             onClick={handleSaveAll}
+             disabled={saving}
+-            className="bg-green-600 text-white px-3 py-1.5 rounded text-sm"
++            className="bg-verdigris text-canvas font-medium px-3 py-1.5 rounded text-sm disabled:opacity-60"
+           >
+             {saving ? "Saving…" : `Save (${draftDeeds.length} deed(s), ${pendingEdges.length} link(s))`}
+           </button>
+@@ -588,11 +603,11 @@ export default function Canvas({ workspace, onView }) {
+       </div>
+ 
+       {(error || duplicateDeedNumbers.length > 0 || edgeDraft) && (
+-        <div className="px-4 py-3 border-b bg-white shrink-0 space-y-3">
+-          {error && <p className="text-red-600 text-sm">{error}</p>}
++        <div className="px-4 py-3 border-b border-border bg-surface shrink-0 space-y-3">
++          {error && <p className="text-brick text-sm">{error}</p>}
+ 
+           {duplicateDeedNumbers.length > 0 && (
+-            <div className="border border-amber-400 bg-amber-50 text-amber-800 rounded p-3 text-sm">
++            <div className="border border-brass/40 bg-brass/10 text-brass rounded p-3 text-sm">
+               <p className="font-medium mb-1">Duplicate deed number(s) in this workspace:</p>
+               <ul className="list-disc list-inside">
+                 {duplicateDeedNumbers.map(([num, group]) => (
+@@ -606,30 +621,30 @@ export default function Canvas({ workspace, onView }) {
+           )}
+ 
+           {edgeDraft && (
+-            <div className="border border-blue-400 bg-blue-50 rounded p-3 text-sm">
+-              <p className="mb-2">
++            <div className="border border-brass bg-surface-raised rounded p-3 text-sm">
++              <p className="mb-2 text-ink">
+                 <strong>{labelForKey(edgeDraft.targetKey)}</strong> derives from{" "}
+                 <strong>{labelForKey(edgeDraft.sourceKey)}</strong>
+               </p>
+               <div className="flex gap-2 mb-2">
+                 <input
+-                  className="flex-1 border rounded px-2 py-1"
++                  className="flex-1 border border-border-strong bg-canvas text-ink placeholder:text-ink-faint rounded px-2 py-1 focus:outline-none focus:border-brass"
+                   placeholder="Area/share transferred (optional)"
+                   value={edgeDraft.areaTransferred}
+                   onChange={(e) => setEdgeDraft({ ...edgeDraft, areaTransferred: e.target.value })}
+                 />
+                 <input
+-                  className="flex-1 border rounded px-2 py-1"
++                  className="flex-1 border border-border-strong bg-canvas text-ink placeholder:text-ink-faint rounded px-2 py-1 focus:outline-none focus:border-brass"
+                   placeholder="Note (optional)"
+                   value={edgeDraft.note}
+                   onChange={(e) => setEdgeDraft({ ...edgeDraft, note: e.target.value })}
+                 />
+               </div>
+               <div className="flex gap-2">
+-                <button onClick={confirmEdgeDraft} className="bg-blue-600 text-white px-3 py-1 rounded">
++                <button onClick={confirmEdgeDraft} className="bg-brass text-canvas font-medium px-3 py-1 rounded">
+                   Add this link
+                 </button>
+-                <button onClick={() => setEdgeDraft(null)} className="px-3 py-1">
++                <button onClick={() => setEdgeDraft(null)} className="px-3 py-1 text-ink-muted hover:text-ink">
+                   Cancel
+                 </button>
+               </div>
+@@ -640,15 +655,19 @@ export default function Canvas({ workspace, onView }) {
+ 
+       <div className="flex-1 min-h-0 flex overflow-hidden">
+         {allCards.length === 0 ? (
+-          <div className="flex-1 flex items-center justify-center text-slate-500 text-sm">
++          <div className="flex-1 flex items-center justify-center text-ink-faint text-sm">
+             No deeds yet. Click "Add Deed" to start.
+           </div>
+         ) : (
+           <div
+             ref={scrollRef}
+             onMouseDown={startPan}
+-            className="flex-1 overflow-auto bg-slate-50"
+-            style={{ cursor: isPanning ? "grabbing" : "grab" }}
++            className="flex-1 overflow-auto bg-canvas"
++            style={{
++              cursor: isPanning ? "grabbing" : "grab",
++              backgroundImage: "radial-gradient(#2b323c 1px, transparent 1px)",
++              backgroundSize: "26px 26px",
++            }}
+           >
+             {/* Outer sizing div matches the *scaled* content dimensions so the
+                 scroll container's scrollbars/scroll range are correct at any
+@@ -677,7 +696,10 @@ export default function Canvas({ workspace, onView }) {
+                 >
+                 <defs>
+                   <marker id="arrowhead-edit" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+-                    <path d="M0,0 L8,4 L0,8 Z" fill="#64748b" />
++                    <path d="M0,0 L8,4 L0,8 Z" fill={WIRE_SAVED} />
++                  </marker>
++                  <marker id="arrowhead-edit-pending" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
++                    <path d="M0,0 L8,4 L0,8 Z" fill={WIRE_PENDING} />
+                   </marker>
+                 </defs>
+ 
+@@ -690,15 +712,26 @@ export default function Canvas({ workspace, onView }) {
+                   const x2 = b.top.x,
+                     y2 = b.top.y;
+                   const midY = (y1 + y2) / 2;
++                  const wireColor = e.saved ? WIRE_SAVED : WIRE_PENDING;
+                   return (
+                     <g key={e._id || `pending-${i}`}>
++                      {/* Soft duplicate underneath for the glow - same path,
++                          wider + blurred + translucent. */}
+                       <path
+                         d={`M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`}
+                         fill="none"
+-                        stroke={e.saved ? "#64748b" : "#f59e0b"}
+-                        strokeWidth="2"
++                        stroke={wireColor}
++                        strokeWidth="5"
++                        opacity="0.16"
++                        style={{ filter: "blur(2px)" }}
++                      />
++                      <path
++                        d={`M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`}
++                        fill="none"
++                        stroke={wireColor}
++                        strokeWidth="1.6"
+                         strokeDasharray={e.saved ? undefined : "5,4"}
+-                        markerEnd="url(#arrowhead-edit)"
++                        markerEnd={e.saved ? "url(#arrowhead-edit)" : "url(#arrowhead-edit-pending)"}
+                         style={{ pointerEvents: "stroke", cursor: "pointer" }}
+                         onClick={() =>
+                           e.saved
+@@ -711,7 +744,7 @@ export default function Canvas({ workspace, onView }) {
+                           x={(x1 + x2) / 2}
+                           y={midY - 4}
+                           fontSize="10"
+-                          fill="#475569"
++                          fill={WIRE_LABEL}
+                           textAnchor="middle"
+                           style={{ pointerEvents: "none" }}
+                         >
+@@ -732,7 +765,7 @@ export default function Canvas({ workspace, onView }) {
+                       <path
+                         d={`M ${a.bottom.x} ${a.bottom.y} C ${a.bottom.x} ${midY}, ${dragPos.x} ${midY}, ${dragPos.x} ${dragPos.y}`}
+                         fill="none"
+-                        stroke="#2563eb"
++                        stroke={WIRE_LIVE_DRAG}
+                         strokeWidth="2"
+                         strokeDasharray="4,4"
+                       />
+@@ -771,7 +804,7 @@ export default function Canvas({ workspace, onView }) {
+                         else topDotRefs.current.delete(key);
+                       }}
+                       title="Derives from (drop a link here)"
+-                      className="w-4 h-4 rounded-full bg-slate-400 border-2 border-white shadow mx-auto"
++                      className="w-4 h-4 rounded-full bg-ink-faint border-2 border-canvas shadow mx-auto"
+                       style={{ position: "absolute", top: -8, left: NODE_W / 2 - 8, zIndex: 5 }}
+                     />
+ 
+@@ -784,7 +817,7 @@ export default function Canvas({ workspace, onView }) {
+                       }}
+                       onMouseDown={startDrag(key)}
+                       title="Drag to link this deed to one derived from it"
+-                      className="w-4 h-4 rounded-full bg-blue-500 border-2 border-white shadow mx-auto cursor-grab active:cursor-grabbing"
++                      className="w-4 h-4 rounded-full bg-brass border-2 border-canvas shadow mx-auto cursor-grab active:cursor-grabbing"
+                       style={{ position: "absolute", bottom: -8, left: NODE_W / 2 - 8, zIndex: 5 }}
+                     />
+                   </div>
+diff --git a/client/src/components/DeedCard.jsx b/client/src/components/DeedCard.jsx
+index 2376272..854523d 100644
+--- a/client/src/components/DeedCard.jsx
++++ b/client/src/components/DeedCard.jsx
+@@ -8,19 +8,23 @@ export default function DeedCard({ deed, isDraft, isSelected }) {
+   const summary = deed.deedInfo?.deedNumber || (isDraft ? "(unsaved deed)" : "(no deed no.)");
+   const buyer = deed.purchasers?.[0]?.name;
+ 
++  // brass = not yet committed (matches the same color used for pending
++  // links), verdigris = currently selected, faint = default/quiet.
++  const barColor = isSelected ? "before:bg-verdigris" : isDraft ? "before:bg-brass" : "before:bg-ink-faint";
++
+   return (
+     // Width must stay in sync with Canvas.jsx's NODE_W constant - the
+     // wrapper positioning (dot centering, layout math) assumes this card is
+     // exactly that wide.
+     <div
+-      className={`w-[400px] border rounded-lg bg-white shadow-sm p-3 select-none ${
+-        isSelected ? "border-blue-500 ring-2 ring-blue-200" : ""
++      className={`relative w-[400px] border border-border rounded-lg bg-surface shadow-sm p-3 pl-4 select-none before:content-[''] before:absolute before:left-0 before:top-2.5 before:bottom-2.5 before:w-[2.5px] before:rounded ${barColor} ${
++        isSelected ? "border-verdigris ring-1 ring-verdigris" : ""
+       }`}
+     >
+-      <p className="font-semibold truncate">
+-        {summary} {isDraft && <span className="text-amber-600 text-xs">(unsaved)</span>}
++      <p className="font-semibold font-serif text-ink truncate">
++        {summary} {isDraft && <span className="text-brass text-xs font-sans font-normal">(unsaved)</span>}
+       </p>
+-      {buyer && <p className="text-xs text-slate-500 truncate">Buyer: {buyer}</p>}
++      {buyer && <p className="text-xs text-ink-muted truncate mt-0.5">Buyer: {buyer}</p>}
+     </div>
+   );
+ }
+diff --git a/client/src/components/DeedForm.jsx b/client/src/components/DeedForm.jsx
+index 0629c01..202e26f 100644
+--- a/client/src/components/DeedForm.jsx
++++ b/client/src/components/DeedForm.jsx
+@@ -19,6 +19,12 @@ export function blankDeed() {
+   };
+ }
+ 
++const inputCls =
++  "border border-border-strong bg-canvas text-ink placeholder:text-ink-faint rounded px-2 py-1 text-sm focus:outline-none focus:border-brass";
++const removeCls = "text-brick text-xs px-1 disabled:opacity-40 disabled:cursor-not-allowed";
++const addLinkCls = "text-xs text-brass hover:underline";
++const sectionLabelCls = "text-xs font-semibold text-ink-faint mb-1";
++
+ function PersonListEditor({ label, people, onChange }) {
+   const update = (i, field, value) => {
+     const next = people.map((p, idx) => (idx === i ? { ...p, [field]: value } : p));
+@@ -26,24 +32,24 @@ function PersonListEditor({ label, people, onChange }) {
+   };
+   return (
+     <div>
+-      <p className="text-xs font-semibold text-slate-500 mb-1">{label}</p>
++      <p className={sectionLabelCls}>{label}</p>
+       {people.map((p, i) => (
+         <div key={i} className="flex gap-2 mb-1">
+           <input
+-            className="flex-1 border rounded px-2 py-1 text-sm"
++            className={`flex-1 ${inputCls}`}
+             placeholder="Name"
+             value={p.name}
+             onChange={(e) => update(i, "name", e.target.value)}
+           />
+           <input
+-            className="flex-1 border rounded px-2 py-1 text-sm"
++            className={`flex-1 ${inputCls}`}
+             placeholder="Father's name"
+             value={p.fatherName}
+             onChange={(e) => update(i, "fatherName", e.target.value)}
+           />
+           <button
+             type="button"
+-            className="text-red-500 text-xs px-1"
++            className={removeCls}
+             disabled={people.length <= 1}
+             onClick={() => onChange(people.filter((_, idx) => idx !== i))}
+           >
+@@ -51,11 +57,7 @@ function PersonListEditor({ label, people, onChange }) {
+           </button>
+         </div>
+       ))}
+-      <button
+-        type="button"
+-        className="text-xs text-blue-600 hover:underline"
+-        onClick={() => onChange([...people, blankPerson()])}
+-      >
++      <button type="button" className={addLinkCls} onClick={() => onChange([...people, blankPerson()])}>
+         + Add {label.slice(0, -1)}
+       </button>
+     </div>
+@@ -71,35 +73,35 @@ function LandParcelEditor({ parcels, onChange }) {
+ 
+   return (
+     <div>
+-      <p className="text-xs font-semibold text-slate-500 mb-1">Land Parcels</p>
++      <p className={sectionLabelCls}>Land Parcels</p>
+       {parcels.map((parcel, i) => (
+-        <div key={i} className="border rounded p-2 mb-2 bg-slate-50">
++        <div key={i} className="border border-border rounded p-2 mb-2 bg-surface-raised">
+           <div className="grid grid-cols-3 gap-2 mb-2">
+             <input
+-              className="border rounded px-2 py-1 text-sm"
++              className={inputCls}
+               placeholder="Area"
+               value={parcel.area}
+               onChange={(e) => updateParcel(i, "area", e.target.value)}
+             />
+             <input
+-              className="border rounded px-2 py-1 text-sm"
++              className={inputCls}
+               placeholder="Mouja"
+               value={parcel.mouja}
+               onChange={(e) => updateParcel(i, "mouja", e.target.value)}
+             />
+             <input
+-              className="border rounded px-2 py-1 text-sm"
++              className={inputCls}
+               placeholder="Sheet No."
+               value={parcel.sheetNo}
+               onChange={(e) => updateParcel(i, "sheetNo", e.target.value)}
+             />
+           </div>
+ 
+-          <p className="text-xs text-slate-500">Khatiya No.(s)</p>
++          <p className="text-xs text-ink-faint">Khatiya No.(s)</p>
+           {parcel.khatiyas.map((k, ki) => (
+             <div key={ki} className="flex gap-2 mb-1">
+               <input
+-                className="flex-1 border rounded px-2 py-1 text-sm"
++                className={`flex-1 ${inputCls}`}
+                 placeholder="Khatiya No."
+                 value={k.number}
+                 onChange={(e) =>
+@@ -113,7 +115,7 @@ function LandParcelEditor({ parcels, onChange }) {
+               />
+               <button
+                 type="button"
+-                className="text-red-500 text-xs px-1"
++                className={removeCls}
+                 disabled={parcel.khatiyas.length <= 1}
+                 onClick={() =>
+                   updateKhatiyas(i, parcel.khatiyas.filter((_, idx) => idx !== ki))
+@@ -125,17 +127,17 @@ function LandParcelEditor({ parcels, onChange }) {
+           ))}
+           <button
+             type="button"
+-            className="text-xs text-blue-600 hover:underline mb-2"
++            className={`${addLinkCls} mb-2`}
+             onClick={() => updateKhatiyas(i, [...parcel.khatiyas, blankKhatiya()])}
+           >
+             + Add Khatiya
+           </button>
+ 
+-          <p className="text-xs text-slate-500">Plots (RS / LR / Area)</p>
++          <p className="text-xs text-ink-faint">Plots (RS / LR / Area)</p>
+           {parcel.plots.map((pl, pi) => (
+             <div key={pi} className="flex gap-2 mb-1">
+               <input
+-                className="flex-1 border rounded px-2 py-1 text-sm"
++                className={`flex-1 ${inputCls}`}
+                 placeholder="RS"
+                 value={pl.rs}
+                 onChange={(e) =>
+@@ -148,7 +150,7 @@ function LandParcelEditor({ parcels, onChange }) {
+                 }
+               />
+               <input
+-                className="flex-1 border rounded px-2 py-1 text-sm"
++                className={`flex-1 ${inputCls}`}
+                 placeholder="LR"
+                 value={pl.lr}
+                 onChange={(e) =>
+@@ -161,7 +163,7 @@ function LandParcelEditor({ parcels, onChange }) {
+                 }
+               />
+               <input
+-                className="flex-1 border rounded px-2 py-1 text-sm"
++                className={`flex-1 ${inputCls}`}
+                 placeholder="Area"
+                 value={pl.area}
+                 onChange={(e) =>
+@@ -175,7 +177,7 @@ function LandParcelEditor({ parcels, onChange }) {
+               />
+               <button
+                 type="button"
+-                className="text-red-500 text-xs px-1"
++                className={removeCls}
+                 disabled={parcel.plots.length <= 1}
+                 onClick={() => updatePlots(i, parcel.plots.filter((_, idx) => idx !== pi))}
+               >
+@@ -185,7 +187,7 @@ function LandParcelEditor({ parcels, onChange }) {
+           ))}
+           <button
+             type="button"
+-            className="text-xs text-blue-600 hover:underline"
++            className={addLinkCls}
+             onClick={() => updatePlots(i, [...parcel.plots, blankPlot()])}
+           >
+             + Add Plot
+@@ -194,7 +196,7 @@ function LandParcelEditor({ parcels, onChange }) {
+           <div className="text-right mt-2">
+             <button
+               type="button"
+-              className="text-red-600 text-xs hover:underline"
++              className="text-brick text-xs hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
+               disabled={parcels.length <= 1}
+               onClick={() => onChange(parcels.filter((_, idx) => idx !== i))}
+             >
+@@ -203,11 +205,7 @@ function LandParcelEditor({ parcels, onChange }) {
+           </div>
+         </div>
+       ))}
+-      <button
+-        type="button"
+-        className="text-xs text-blue-600 hover:underline"
+-        onClick={() => onChange([...parcels, blankParcel()])}
+-      >
++      <button type="button" className={addLinkCls} onClick={() => onChange([...parcels, blankParcel()])}>
+         + Add Land Parcel
+       </button>
+     </div>
+@@ -222,7 +220,7 @@ export default function DeedForm({ deed, onChange }) {
+   return (
+     <div className="space-y-3">
+       <input
+-        className="w-full border rounded px-2 py-1 font-medium"
++        className={`w-full ${inputCls} font-medium`}
+         placeholder="Deed title (for your own reference)"
+         value={deed.title}
+         onChange={(e) => set("title", e.target.value)}
+@@ -230,25 +228,25 @@ export default function DeedForm({ deed, onChange }) {
+ 
+       <div className="grid grid-cols-2 gap-2">
+         <input
+-          className="border rounded px-2 py-1 text-sm"
++          className={inputCls}
+           placeholder="Deed No."
+           value={deed.deedInfo.deedNumber}
+           onChange={(e) => setDeedInfo("deedNumber", e.target.value)}
+         />
+         <input
+-          className="border rounded px-2 py-1 text-sm"
++          className={inputCls}
+           placeholder="Volume No."
+           value={deed.deedInfo.volumeNumber}
+           onChange={(e) => setDeedInfo("volumeNumber", e.target.value)}
+         />
+         <input
+-          className="border rounded px-2 py-1 text-sm"
++          className={inputCls}
+           placeholder="Page No."
+           value={deed.deedInfo.pageNumber}
+           onChange={(e) => setDeedInfo("pageNumber", e.target.value)}
+         />
+         <input
+-          className="border rounded px-2 py-1 text-sm"
++          className={inputCls}
+           placeholder="Office No."
+           value={deed.deedInfo.officeNumber}
+           onChange={(e) => setDeedInfo("officeNumber", e.target.value)}
+diff --git a/client/src/components/DeedSidebar.jsx b/client/src/components/DeedSidebar.jsx
+index 3746f95..63dc63f 100644
+--- a/client/src/components/DeedSidebar.jsx
++++ b/client/src/components/DeedSidebar.jsx
+@@ -54,18 +54,18 @@ export default function DeedSidebar({ deed, isDraft, onChange, onSave, onDelete,
+   const buyer = displayDeed.purchasers?.[0]?.name;
+ 
+   return (
+-    <div className="w-96 shrink-0 border-l bg-white flex flex-col">
+-      <div className="flex items-start justify-between p-4 border-b shrink-0">
++    <div className="w-96 shrink-0 border-l border-border bg-surface flex flex-col text-ink">
++      <div className="flex items-start justify-between p-4 border-b border-border shrink-0">
+         <div className="min-w-0">
+-          <p className="font-semibold truncate">
+-            {summary} {isDraft && <span className="text-amber-600 text-xs">(unsaved)</span>}
++          <p className="font-semibold font-serif truncate">
++            {summary} {isDraft && <span className="text-brass text-xs font-sans font-normal">(unsaved)</span>}
+           </p>
+-          {buyer && <p className="text-xs text-slate-500 truncate">Buyer: {buyer}</p>}
+-          {!isDraft && dirty && <p className="text-xs text-amber-600 mt-0.5">Unsaved changes</p>}
++          {buyer && <p className="text-xs text-ink-muted truncate mt-0.5">Buyer: {buyer}</p>}
++          {!isDraft && dirty && <p className="text-xs text-brass mt-0.5">Unsaved changes</p>}
+         </div>
+         <button
+           onClick={onClose}
+-          className="text-slate-400 hover:text-slate-700 text-sm shrink-0 ml-2"
++          className="text-ink-faint hover:text-ink text-sm shrink-0 ml-2"
+           title="Close"
+         >
+           ✕
+@@ -76,12 +76,12 @@ export default function DeedSidebar({ deed, isDraft, onChange, onSave, onDelete,
+         <DeedForm deed={displayDeed} onChange={handleFormChange} />
+       </div>
+ 
+-      <div className="flex items-center gap-2 p-4 border-t shrink-0">
++      <div className="flex items-center gap-2 p-4 border-t border-border shrink-0">
+         {!isDraft && dirty && (
+           <>
+             <button
+               type="button"
+-              className="bg-green-600 text-white text-sm px-3 py-1.5 rounded"
++              className="bg-verdigris text-canvas font-medium text-sm px-3 py-1.5 rounded disabled:opacity-60"
+               onClick={handleSaveClick}
+               disabled={saving}
+             >
+@@ -89,7 +89,7 @@ export default function DeedSidebar({ deed, isDraft, onChange, onSave, onDelete,
+             </button>
+             <button
+               type="button"
+-              className="text-sm px-3 py-1.5 border rounded"
++              className="text-sm px-3 py-1.5 border border-border text-ink-muted hover:text-ink rounded"
+               onClick={handleDiscardClick}
+             >
+               Discard
+@@ -97,7 +97,7 @@ export default function DeedSidebar({ deed, isDraft, onChange, onSave, onDelete,
+           </>
+         )}
+         <div className="flex-1" />
+-        <button type="button" className="text-red-600 text-sm hover:underline" onClick={onDelete}>
++        <button type="button" className="text-brick text-sm hover:underline" onClick={onDelete}>
+           Delete
+         </button>
+       </div>
+diff --git a/client/src/components/LineageGraph.jsx b/client/src/components/LineageGraph.jsx
+index 18f97ae..9e2a986 100644
+--- a/client/src/components/LineageGraph.jsx
++++ b/client/src/components/LineageGraph.jsx
+@@ -14,6 +14,16 @@ const COL_GAP = 40;
+ const ROW_GAP = 70;
+ const PADDING = 30;
+ 
++// Mirrors tailwind.config.js's dark theme palette - see the comment on the
++// same constants in Canvas.jsx for why these are hardcoded hex rather than
++// Tailwind utility classes.
++const C_SURFACE = "#1b2027";
++const C_BORDER_STRONG = "#3a4350";
++const C_VERDIGRIS = "#4f9a8c";
++const C_BRASS_SOFT = "#a9723a";
++const C_INK = "#e9e6dc";
++const C_INK_MUTED = "#8d94a3";
++
+ export default function LineageGraph({ workspace, onBack, initialSelectedId }) {
+   const [deeds, setDeeds] = useState([]);
+   const [relationships, setRelationships] = useState([]);
+@@ -71,28 +81,28 @@ export default function LineageGraph({ workspace, onBack, initialSelectedId }) {
+   if (deeds.length === 0) {
+     return (
+       <div className="max-w-6xl mx-auto py-8 px-4">
+-        <p className="text-slate-500">No deeds in this workspace yet.</p>
++        <p className="text-ink-faint">No deeds in this workspace yet.</p>
+       </div>
+     );
+   }
+ 
+   return (
+-    <div className="max-w-6xl mx-auto py-8 px-4">
++    <div className="max-w-6xl mx-auto py-8 px-4 text-ink">
+       <div className="flex items-center justify-between mb-1">
+-        <h2 className="text-lg font-semibold">{workspace.name} — Lineage</h2>
++        <h2 className="text-lg font-semibold font-serif">{workspace.name} — Lineage</h2>
+         {onBack && (
+-          <button onClick={onBack} className="text-sm text-blue-600 hover:underline">
++          <button onClick={onBack} className="text-sm text-brass hover:underline">
+             ← Back to editing
+           </button>
+         )}
+       </div>
+-      <p className="text-sm text-slate-500 mb-4">
++      <p className="text-sm text-ink-faint mb-4">
+         Arrows point from a source deed to the deed(s) derived from it. A deed with several
+         incoming arrows converged from multiple sources; several outgoing arrows means it
+         diverged into multiple later deeds. Click a deed to see its full details and lineage.
+       </p>
+       <div className="flex gap-4 items-start">
+-        <div className="bg-white border rounded overflow-auto flex-1">
++        <div className="bg-surface border border-border rounded overflow-auto flex-1">
+           <svg width={Math.max(width, 400)} height={Math.max(height, 200)}>
+           <defs>
+             <marker
+@@ -103,7 +113,7 @@ export default function LineageGraph({ workspace, onBack, initialSelectedId }) {
+               refY="4"
+               orient="auto"
+             >
+-              <path d="M0,0 L8,4 L0,8 Z" fill="#64748b" />
++              <path d="M0,0 L8,4 L0,8 Z" fill={C_BRASS_SOFT} />
+             </marker>
+           </defs>
+ 
+@@ -120,12 +130,12 @@ export default function LineageGraph({ workspace, onBack, initialSelectedId }) {
+                 <path
+                   d={`M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`}
+                   fill="none"
+-                  stroke="#64748b"
++                  stroke={C_BRASS_SOFT}
+                   strokeWidth="1.5"
+                   markerEnd="url(#arrowhead)"
+                 />
+                 {e.areaTransferred && (
+-                  <text x={(x1 + x2) / 2} y={midY - 4} fontSize="10" fill="#475569" textAnchor="middle">
++                  <text x={(x1 + x2) / 2} y={midY - 4} fontSize="10" fill={C_INK_MUTED} textAnchor="middle">
+                     {e.areaTransferred}
+                   </text>
+                 )}
+@@ -151,14 +161,14 @@ export default function LineageGraph({ workspace, onBack, initialSelectedId }) {
+                   width={NODE_W}
+                   height={NODE_H}
+                   rx="8"
+-                  fill="#fff"
+-                  stroke={selectedId === deed._id ? "#2563eb" : "#334155"}
++                  fill={C_SURFACE}
++                  stroke={selectedId === deed._id ? C_VERDIGRIS : C_BORDER_STRONG}
+                   strokeWidth={selectedId === deed._id ? "2.5" : "1.5"}
+                 />
+-                <text x="10" y="22" fontSize="12" fontWeight="600" fill="#0f172a">
++                <text x="10" y="22" fontSize="12" fontWeight="600" fontFamily="Fraunces, serif" fill={C_INK}>
+                   {(deedById.get(deed._id).deedInfo?.deedNumber || "(no deed no.)").slice(0, 22)}
+                 </text>
+-                <text x="10" y="40" fontSize="11" fill="#475569">
++                <text x="10" y="40" fontSize="11" fill={C_INK_MUTED}>
+                   {(deedById.get(deed._id).purchasers?.[0]?.name || "").slice(0, 24)}
+                 </text>
+               </g>
+@@ -168,11 +178,11 @@ export default function LineageGraph({ workspace, onBack, initialSelectedId }) {
+         </div>
+ 
+         {selectedDeed && (
+-          <div className="w-80 shrink-0 bg-white border rounded p-4 text-sm">
++          <div className="w-80 shrink-0 bg-surface border border-border rounded p-4 text-sm">
+             <div className="flex items-start justify-between mb-2">
+-              <h3 className="font-semibold">{deedLabel(selectedDeed)}</h3>
++              <h3 className="font-semibold font-serif">{deedLabel(selectedDeed)}</h3>
+               <button
+-                className="text-slate-400 hover:text-slate-700 text-xs"
++                className="text-ink-faint hover:text-ink text-xs"
+                 onClick={() => setSelectedId(null)}
+               >
+                 ✕
+@@ -181,7 +191,7 @@ export default function LineageGraph({ workspace, onBack, initialSelectedId }) {
+ 
+             <dl className="space-y-1 mb-3">
+               <div>
+-                <dt className="text-xs text-slate-500">Deed No. / Volume / Page / Office</dt>
++                <dt className="text-xs text-ink-faint">Deed No. / Volume / Page / Office</dt>
+                 <dd>
+                   {selectedDeed.deedInfo?.deedNumber || "—"} /{" "}
+                   {selectedDeed.deedInfo?.volumeNumber || "—"} /{" "}
+@@ -190,32 +200,32 @@ export default function LineageGraph({ workspace, onBack, initialSelectedId }) {
+                 </dd>
+               </div>
+               <div>
+-                <dt className="text-xs text-slate-500">Purchasers</dt>
++                <dt className="text-xs text-ink-faint">Purchasers</dt>
+                 <dd>{selectedDeed.purchasers?.map((p) => p.name).filter(Boolean).join(", ") || "—"}</dd>
+               </div>
+               <div>
+-                <dt className="text-xs text-slate-500">Sellers</dt>
++                <dt className="text-xs text-ink-faint">Sellers</dt>
+                 <dd>{selectedDeed.sellers?.map((s) => s.name).filter(Boolean).join(", ") || "—"}</dd>
+               </div>
+               <div>
+-                <dt className="text-xs text-slate-500">Mouja / Sheet No.</dt>
++                <dt className="text-xs text-ink-faint">Mouja / Sheet No.</dt>
+                 <dd>
+                   {selectedDeed.landParcels?.map((lp) => lp.mouja).filter(Boolean).join(", ") || "—"} /{" "}
+                   {selectedDeed.landParcels?.map((lp) => lp.sheetNo).filter(Boolean).join(", ") || "—"}
+                 </dd>
+               </div>
+               <div>
+-                <dt className="text-xs text-slate-500">Total Area</dt>
++                <dt className="text-xs text-ink-faint">Total Area</dt>
+                 <dd>{selectedDeed.landParcels?.map((lp) => lp.area).filter(Boolean).join(", ") || "—"}</dd>
+               </div>
+             </dl>
+ 
+-            <div className="border-t pt-2 mb-2">
+-              <p className="text-xs font-semibold text-slate-500 mb-1">
++            <div className="border-t border-border pt-2 mb-2">
++              <p className="text-xs font-semibold text-ink-faint mb-1">
+                 Sourced from ({incoming.length})
+               </p>
+               {incoming.length === 0 ? (
+-                <p className="text-xs text-slate-400">This is a root deed — no earlier source.</p>
++                <p className="text-xs text-ink-faint">This is a root deed — no earlier source.</p>
+               ) : (
+                 <ul className="space-y-1">
+                   {incoming.map((r) => {
+@@ -223,7 +233,7 @@ export default function LineageGraph({ workspace, onBack, initialSelectedId }) {
+                     return (
+                       <li key={r._id}>
+                         <button
+-                          className="text-blue-600 hover:underline text-left"
++                          className="text-brass hover:underline text-left"
+                           onClick={() => setSelectedId(String(r.sourceDeedId))}
+                         >
+                           {src ? deedLabel(src) : "(deleted deed)"}
+@@ -236,12 +246,12 @@ export default function LineageGraph({ workspace, onBack, initialSelectedId }) {
+               )}
+             </div>
+ 
+-            <div className="border-t pt-2">
+-              <p className="text-xs font-semibold text-slate-500 mb-1">
++            <div className="border-t border-border pt-2">
++              <p className="text-xs font-semibold text-ink-faint mb-1">
+                 Derived into ({outgoing.length})
+               </p>
+               {outgoing.length === 0 ? (
+-                <p className="text-xs text-slate-400">No later deeds derive from this one yet.</p>
++                <p className="text-xs text-ink-faint">No later deeds derive from this one yet.</p>
+               ) : (
+                 <ul className="space-y-1">
+                   {outgoing.map((r) => {
+@@ -249,7 +259,7 @@ export default function LineageGraph({ workspace, onBack, initialSelectedId }) {
+                     return (
+                       <li key={r._id}>
+                         <button
+-                          className="text-blue-600 hover:underline text-left"
++                          className="text-brass hover:underline text-left"
+                           onClick={() => setSelectedId(String(r.targetDeedId))}
+                         >
+                           {tgt ? deedLabel(tgt) : "(deleted deed)"}
+diff --git a/client/src/components/SearchPanel.jsx b/client/src/components/SearchPanel.jsx
+index da4f174..8593121 100644
+--- a/client/src/components/SearchPanel.jsx
++++ b/client/src/components/SearchPanel.jsx
+@@ -55,18 +55,18 @@ export default function SearchPanel({ workspace, onlyThisWorkspace = true, onSel
+   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+ 
+   return (
+-    <div className="max-w-3xl mx-auto py-8 px-4">
++    <div className="max-w-3xl mx-auto py-8 px-4 text-ink">
+       <form onSubmit={runSearch} className="flex flex-wrap gap-2 mb-4">
+         <input
+           value={q}
+           onChange={(e) => setQ(e.target.value)}
+           placeholder="Search…"
+-          className="flex-1 border rounded px-3 py-2"
++          className="flex-1 border border-border-strong bg-surface text-ink placeholder:text-ink-faint rounded px-3 py-2 focus:outline-none focus:border-brass"
+         />
+         <select
+           value={topic}
+           onChange={(e) => setTopic(e.target.value)}
+-          className="border rounded px-2 py-2"
++          className="border border-border-strong bg-surface text-ink rounded px-2 py-2 focus:outline-none focus:border-brass"
+         >
+           {TOPICS.map((t) => (
+             <option key={t.value} value={t.value}>
+@@ -74,7 +74,7 @@ export default function SearchPanel({ workspace, onlyThisWorkspace = true, onSel
+             </option>
+           ))}
+         </select>
+-        <label className="flex items-center gap-1 text-sm">
++        <label className="flex items-center gap-1 text-sm text-ink-muted">
+           <input
+             type="checkbox"
+             checked={scopeWorkspace}
+@@ -82,28 +82,28 @@ export default function SearchPanel({ workspace, onlyThisWorkspace = true, onSel
+           />
+           This workspace only
+         </label>
+-        <button className="bg-slate-900 text-white px-4 py-2 rounded">Search</button>
++        <button className="bg-brass text-canvas font-medium px-4 py-2 rounded">Search</button>
+       </form>
+ 
+-      {loading && <p>Searching…</p>}
+-      {results && results.length === 0 && <p className="text-slate-500">No matches.</p>}
++      {loading && <p className="text-ink-muted">Searching…</p>}
++      {results && results.length === 0 && <p className="text-ink-faint">No matches.</p>}
+       {results && results.length > 0 && (
+         <ul className="space-y-2">
+           {results.map(({ deed, parents, children }) => (
+             <li
+               key={deed._id}
+-              className="bg-white border rounded p-3 cursor-pointer hover:border-blue-400"
++              className="bg-surface border border-border rounded p-3 cursor-pointer hover:border-brass"
+               onClick={() => onSelectDeed && onSelectDeed(deed)}
+             >
+-              <p className="font-medium text-blue-700 hover:underline">{deedLabel(deed)}</p>
+-              <p className="text-xs text-slate-500">
++              <p className="font-medium font-serif text-brass hover:underline">{deedLabel(deed)}</p>
++              <p className="text-xs text-ink-faint">
+                 Mouja: {deed.landParcels?.map((lp) => lp.mouja).filter(Boolean).join(", ") || "—"}
+               </p>
+               {parents.length > 0 && (
+-                <p className="text-xs text-slate-500">{parents.length} parent deed(s)</p>
++                <p className="text-xs text-ink-faint">{parents.length} parent deed(s)</p>
+               )}
+               {children.length > 0 && (
+-                <p className="text-xs text-slate-500">{children.length} child deed(s)</p>
++                <p className="text-xs text-ink-faint">{children.length} child deed(s)</p>
+               )}
+             </li>
+           ))}
+@@ -115,17 +115,17 @@ export default function SearchPanel({ workspace, onlyThisWorkspace = true, onSel
+           <button
+             onClick={() => runSearch(null, page - 1)}
+             disabled={page <= 1 || loading}
+-            className="px-3 py-1 border rounded disabled:opacity-40"
++            className="px-3 py-1 border border-border text-ink-muted rounded disabled:opacity-40"
+           >
+             ← Prev
+           </button>
+-          <span className="text-slate-500">
++          <span className="text-ink-faint">
+             Page {page} of {totalPages} ({total} match{total === 1 ? "" : "es"})
+           </span>
+           <button
+             onClick={() => runSearch(null, page + 1)}
+             disabled={page >= totalPages || loading}
+-            className="px-3 py-1 border rounded disabled:opacity-40"
++            className="px-3 py-1 border border-border text-ink-muted rounded disabled:opacity-40"
+           >
+             Next →
+           </button>
+diff --git a/client/src/components/WorkspaceList.jsx b/client/src/components/WorkspaceList.jsx
+index d33907a..72b637d 100644
+--- a/client/src/components/WorkspaceList.jsx
++++ b/client/src/components/WorkspaceList.jsx
+@@ -69,31 +69,31 @@ export default function WorkspaceList({ onOpen }) {
+ 
+   return (
+     <div className="max-w-2xl mx-auto py-12 px-4">
+-      <h1 className="text-2xl font-bold mb-6">DeedTracker — Workspaces</h1>
++      <h1 className="text-2xl font-semibold font-serif mb-6">DeedTracker — Workspaces</h1>
+ 
+       <form onSubmit={handleCreate} className="flex gap-2 mb-8">
+         <input
+           value={name}
+           onChange={(e) => setName(e.target.value)}
+           placeholder="New workspace name (e.g. '100-acre Sundarban tract')"
+-          className="flex-1 border rounded px-3 py-2"
++          className="flex-1 border border-border-strong bg-surface text-ink placeholder:text-ink-faint rounded px-3 py-2 focus:outline-none focus:border-brass"
+         />
+-        <button className="bg-slate-900 text-white px-4 py-2 rounded hover:bg-slate-700">
++        <button className="bg-brass text-canvas font-medium px-4 py-2 rounded hover:bg-brass-soft">
+           Create
+         </button>
+       </form>
+ 
+-      {error && <p className="text-red-600 mb-4">{error}</p>}
++      {error && <p className="text-brick mb-4">{error}</p>}
+       {loading ? (
+-        <p>Loading…</p>
++        <p className="text-ink-muted">Loading…</p>
+       ) : workspaces.length === 0 ? (
+-        <p className="text-slate-500">No workspaces yet — create one above.</p>
++        <p className="text-ink-faint">No workspaces yet — create one above.</p>
+       ) : (
+         <ul className="space-y-2">
+           {workspaces.map((w) => (
+             <li
+               key={w._id}
+-              className="flex items-center justify-between bg-white border rounded px-4 py-3"
++              className="flex items-center justify-between bg-surface border border-border rounded px-4 py-3"
+             >
+               {renamingId === w._id ? (
+                 <form
+@@ -107,12 +107,12 @@ export default function WorkspaceList({ onOpen }) {
+                     autoFocus
+                     value={renameValue}
+                     onChange={(e) => setRenameValue(e.target.value)}
+-                    className="flex-1 border rounded px-2 py-1"
++                    className="flex-1 border border-border-strong bg-canvas text-ink rounded px-2 py-1 focus:outline-none focus:border-brass"
+                   />
+-                  <button className="text-sm text-green-700 hover:underline">Save</button>
++                  <button className="text-sm text-verdigris hover:underline">Save</button>
+                   <button
+                     type="button"
+-                    className="text-sm text-slate-500 hover:underline"
++                    className="text-sm text-ink-muted hover:underline"
+                     onClick={() => setRenamingId(null)}
+                   >
+                     Cancel
+@@ -121,7 +121,7 @@ export default function WorkspaceList({ onOpen }) {
+               ) : (
+                 <button
+                   onClick={() => onOpen(w)}
+-                  className="text-left font-medium hover:underline"
++                  className="text-left font-medium font-serif hover:underline"
+                 >
+                   {w.name}
+                 </button>
+@@ -130,13 +130,13 @@ export default function WorkspaceList({ onOpen }) {
+                 <div className="flex gap-3">
+                   <button
+                     onClick={() => startRename(w)}
+-                    className="text-slate-500 text-sm hover:underline"
++                    className="text-ink-muted text-sm hover:underline"
+                   >
+                     Rename
+                   </button>
+                   <button
+                     onClick={() => handleDelete(w._id)}
+-                    className="text-red-600 text-sm hover:underline"
++                    className="text-brick text-sm hover:underline"
+                   >
+                     Delete
+                   </button>
+@@ -152,17 +152,17 @@ export default function WorkspaceList({ onOpen }) {
+           <button
+             onClick={() => setPage((p) => Math.max(1, p - 1))}
+             disabled={page <= 1}
+-            className="px-3 py-1 border rounded disabled:opacity-40"
++            className="px-3 py-1 border border-border text-ink-muted rounded disabled:opacity-40"
+           >
+             ← Prev
+           </button>
+-          <span className="text-slate-500">
++          <span className="text-ink-faint">
+             Page {page} of {totalPages} ({total} workspace{total === 1 ? "" : "s"})
+           </span>
+           <button
+             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+             disabled={page >= totalPages}
+-            className="px-3 py-1 border rounded disabled:opacity-40"
++            className="px-3 py-1 border border-border text-ink-muted rounded disabled:opacity-40"
+           >
+             Next →
+           </button>
+diff --git a/client/src/index.css b/client/src/index.css
+index c36a66f..68fa2ee 100644
+--- a/client/src/index.css
++++ b/client/src/index.css
+@@ -3,5 +3,5 @@
+ @tailwind utilities;
+ 
+ body {
+-  @apply bg-slate-100 text-slate-900;
++  @apply bg-canvas text-ink font-sans;
+ }
+diff --git a/client/tailwind.config.js b/client/tailwind.config.js
+index bebc908..fac887e 100644
+--- a/client/tailwind.config.js
++++ b/client/tailwind.config.js
+@@ -2,7 +2,37 @@
+ export default {
+   content: ["./index.html", "./src/**/*.{js,jsx}"],
+   theme: {
+-    extend: {},
++    extend: {
++      colors: {
++        // Dark "data-flow" theme, grounded in the land-deed-ledger subject
++        // matter rather than a generic dark-dashboard look. See
++        // PROJECT_CONTEXT.md's Important Decisions for the reasoning.
++        canvas: "#12151a", // page/canvas background - deep ink-charcoal, not pure black
++        surface: {
++          DEFAULT: "#1b2027", // cards, panels, toolbar
++          raised: "#20262e", // hover/raised state
++        },
++        border: {
++          DEFAULT: "#2b323c",
++          strong: "#3a4350",
++        },
++        ink: {
++          DEFAULT: "#e9e6dc", // primary text - warm off-white, not pure white
++          muted: "#8d94a3",
++          faint: "#5c6373",
++        },
++        brass: {
++          DEFAULT: "#c98a3b", // connector wires, primary actions - deed-seal/ink-stamp tone
++          soft: "#a9723a",
++        },
++        verdigris: "#4f9a8c", // selection state - deliberately distinct from brass
++        brick: "#b2543f", // destructive actions
++      },
++      fontFamily: {
++        serif: ["Fraunces", "ui-serif", "Georgia", "serif"],
++        sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"],
++      },
++    },
+   },
+   plugins: [],
+ };
