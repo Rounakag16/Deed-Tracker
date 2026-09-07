@@ -55,18 +55,18 @@ export default function SearchPanel({ workspace, onlyThisWorkspace = true, onSel
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
-    <div className="max-w-3xl mx-auto py-8 px-4">
+    <div className="max-w-3xl mx-auto py-8 px-4 text-ink">
       <form onSubmit={runSearch} className="flex flex-wrap gap-2 mb-4">
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder="Search…"
-          className="flex-1 border rounded px-3 py-2"
+          className="flex-1 border border-border-strong bg-surface text-ink placeholder:text-ink-faint rounded px-3 py-2 focus:outline-none focus:border-brass"
         />
         <select
           value={topic}
           onChange={(e) => setTopic(e.target.value)}
-          className="border rounded px-2 py-2"
+          className="border border-border-strong bg-surface text-ink rounded px-2 py-2 focus:outline-none focus:border-brass"
         >
           {TOPICS.map((t) => (
             <option key={t.value} value={t.value}>
@@ -74,7 +74,7 @@ export default function SearchPanel({ workspace, onlyThisWorkspace = true, onSel
             </option>
           ))}
         </select>
-        <label className="flex items-center gap-1 text-sm">
+        <label className="flex items-center gap-1 text-sm text-ink-muted">
           <input
             type="checkbox"
             checked={scopeWorkspace}
@@ -82,28 +82,28 @@ export default function SearchPanel({ workspace, onlyThisWorkspace = true, onSel
           />
           This workspace only
         </label>
-        <button className="bg-slate-900 text-white px-4 py-2 rounded">Search</button>
+        <button className="bg-brass text-canvas font-medium px-4 py-2 rounded">Search</button>
       </form>
 
-      {loading && <p>Searching…</p>}
-      {results && results.length === 0 && <p className="text-slate-500">No matches.</p>}
+      {loading && <p className="text-ink-muted">Searching…</p>}
+      {results && results.length === 0 && <p className="text-ink-faint">No matches.</p>}
       {results && results.length > 0 && (
         <ul className="space-y-2">
           {results.map(({ deed, parents, children }) => (
             <li
               key={deed._id}
-              className="bg-white border rounded p-3 cursor-pointer hover:border-blue-400"
+              className="bg-surface border border-border rounded p-3 cursor-pointer hover:border-brass"
               onClick={() => onSelectDeed && onSelectDeed(deed)}
             >
-              <p className="font-medium text-blue-700 hover:underline">{deedLabel(deed)}</p>
-              <p className="text-xs text-slate-500">
+              <p className="font-medium font-serif text-brass hover:underline">{deedLabel(deed)}</p>
+              <p className="text-xs text-ink-faint">
                 Mouja: {deed.landParcels?.map((lp) => lp.mouja).filter(Boolean).join(", ") || "—"}
               </p>
               {parents.length > 0 && (
-                <p className="text-xs text-slate-500">{parents.length} parent deed(s)</p>
+                <p className="text-xs text-ink-faint">{parents.length} parent deed(s)</p>
               )}
               {children.length > 0 && (
-                <p className="text-xs text-slate-500">{children.length} child deed(s)</p>
+                <p className="text-xs text-ink-faint">{children.length} child deed(s)</p>
               )}
             </li>
           ))}
@@ -115,17 +115,17 @@ export default function SearchPanel({ workspace, onlyThisWorkspace = true, onSel
           <button
             onClick={() => runSearch(null, page - 1)}
             disabled={page <= 1 || loading}
-            className="px-3 py-1 border rounded disabled:opacity-40"
+            className="px-3 py-1 border border-border text-ink-muted rounded disabled:opacity-40"
           >
             ← Prev
           </button>
-          <span className="text-slate-500">
+          <span className="text-ink-faint">
             Page {page} of {totalPages} ({total} match{total === 1 ? "" : "es"})
           </span>
           <button
             onClick={() => runSearch(null, page + 1)}
             disabled={page >= totalPages || loading}
-            className="px-3 py-1 border rounded disabled:opacity-40"
+            className="px-3 py-1 border border-border text-ink-muted rounded disabled:opacity-40"
           >
             Next →
           </button>

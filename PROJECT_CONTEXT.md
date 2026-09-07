@@ -451,6 +451,20 @@ client will need a login flow added ahead of `WorkspaceList.jsx`.
 - Two-sheet Excel export with root-ancestor tracing
 - Consistent error handling: async route errors are caught and Mongoose
   validation/cast errors surface as clean 400s instead of hanging or 500ing
+- **Dark "data-flow" visual redesign (diff `0015`)** - the light Tailwind
+  UI was replaced across every client component (`Canvas.jsx`,
+  `DeedCard.jsx`, `DeedSidebar.jsx`, `DeedForm.jsx`, `LineageGraph.jsx`,
+  `WorkspaceList.jsx`, `SearchPanel.jsx`, `App.jsx`) with the palette/font
+  tokens defined in `tailwind.config.js` (`canvas`, `surface`, `border`,
+  `ink`, `brass`, `verdigris`, `brick`; Fraunces for deed numbers/headings,
+  Inter for UI chrome, both loaded via Google Fonts in `index.html`).
+  Wires got a soft glow duplicate-path treatment; each `DeedCard` has a
+  left accent bar (brass = unsaved draft, verdigris = selected, faint =
+  default) that also doubles as a future per-status/per-workspace color
+  hook if wanted. See Important Decisions above for the color/font
+  reasoning. This was a pure restyle - no component's logic, state, or
+  handlers changed; verified by diffing every edited file against its
+  pre-redesign version.
 
 **Partially completed:**
 - No automated tests exist anywhere in the repo (manual/static review only,
@@ -463,6 +477,18 @@ client will need a login flow added ahead of `WorkspaceList.jsx`.
   fixes below) with standalone Node scripts. This is real verification of
   that logic in isolation, but still not the same as a live end-to-end
   pass - see Known Issues for what it found/fixed.
+- **`client/node_modules` in the uploaded zip is a Windows (win32-x64)
+  install**, so `rollup`'s and `esbuild`'s native binaries don't run in
+  this (Linux) sandbox - `npm run build` / `vite build` / `vite dev`
+  can't actually execute here, same as every prior session's "no live
+  browser" constraint, just now root-caused precisely. Diff `0015`'s
+  redesign was instead syntax-verified with `@babel/parser` directly
+  (pure JS, ships as a dependency of `@vitejs/plugin-react`, no native
+  binary needed) against every `.jsx` file touched, and every edit to an
+  existing file was diffed against the pre-edit version to confirm only
+  `className`/color/font lines changed, not logic - real verification,
+  but still not the same as an actual rendered browser check. On the
+  user's own (Windows) machine, `npm run build` should work normally.
 
 **Not implemented:**
 - Authentication/authorization (explicitly deferred, see Important
@@ -472,9 +498,6 @@ client will need a login flow added ahead of `WorkspaceList.jsx`.
   deprioritized by the user for now ("we have a lot of time")
 - Bulk import (e.g. migrating data out of the old Firebase version)
 - Any confirmation/undo beyond native `confirm()` dialogs
-- **Dark "data-flow" visual redesign** - chosen this session (inspired by
-  a dribbble.com reference the user shared) as the target look for the
-  canvas/node UI, but not yet built. See Important Decisions.
 
 ## Known Issues
 

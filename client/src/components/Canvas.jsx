@@ -8,6 +8,15 @@ import { computeLayers, computePositions } from "../layout";
 let tempIdCounter = 0;
 const nextTempId = () => `draft_${++tempIdCounter}`;
 
+// SVG stroke/fill colors, hardcoded to match tailwind.config.js's dark
+// theme palette exactly (Tailwind's stroke-color utilities don't cover
+// dynamically-chosen colors here, so these mirror the config values
+// directly - same pattern the pre-redesign code used with raw hex).
+const WIRE_SAVED = "#a9723a"; // brass-soft
+const WIRE_PENDING = "#c98a3b"; // brass
+const WIRE_LIVE_DRAG = "#4f9a8c"; // verdigris
+const WIRE_LABEL = "#8d94a3"; // ink-muted
+
 function deedLabel(deed) {
   const num = deed.deedInfo?.deedNumber || "(no deed no.)";
   const buyer = deed.purchasers?.[0]?.name || "";
@@ -532,22 +541,22 @@ export default function Canvas({ workspace, onView }) {
   const hasUnsaved = draftDeeds.length > 0 || pendingEdges.length > 0;
 
   return (
-    <div className="h-full flex flex-col">
-      <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b bg-white shrink-0">
-        <h2 className="text-xl font-bold">{workspace.name}</h2>
+    <div className="h-full flex flex-col bg-canvas text-ink">
+      <div className="flex flex-wrap items-center gap-3 px-4 py-3 border-b border-border bg-surface shrink-0">
+        <h2 className="text-xl font-semibold font-serif">{workspace.name}</h2>
         <div className="flex-1" />
-        <div className="flex items-center border rounded overflow-hidden text-sm">
+        <div className="flex items-center border border-border rounded overflow-hidden text-sm">
           <button
             onClick={zoomOut}
             disabled={zoom <= MIN_ZOOM}
-            className="px-2 py-1.5 hover:bg-slate-100 disabled:opacity-40"
+            className="px-2 py-1.5 text-ink-muted hover:bg-surface-raised disabled:opacity-40"
             title="Zoom out"
           >
             −
           </button>
           <button
             onClick={zoomReset}
-            className="px-2 py-1.5 border-x hover:bg-slate-100 w-14"
+            className="px-2 py-1.5 border-x border-border text-ink-muted hover:bg-surface-raised w-14"
             title="Reset zoom"
           >
             {Math.round(zoom * 100)}%
@@ -555,24 +564,30 @@ export default function Canvas({ workspace, onView }) {
           <button
             onClick={zoomIn}
             disabled={zoom >= MAX_ZOOM}
-            className="px-2 py-1.5 hover:bg-slate-100 disabled:opacity-40"
+            className="px-2 py-1.5 text-ink-muted hover:bg-surface-raised disabled:opacity-40"
             title="Zoom in"
           >
             +
           </button>
         </div>
-        <button onClick={addDraftDeed} className="bg-slate-900 text-white px-3 py-1.5 rounded text-sm">
+        <button onClick={addDraftDeed} className="bg-brass text-canvas font-medium px-3 py-1.5 rounded text-sm">
           + Add Deed
         </button>
-        <button onClick={onView} className="border border-slate-900 px-3 py-1.5 rounded text-sm">
+        <button
+          onClick={onView}
+          className="border border-border-strong text-ink px-3 py-1.5 rounded text-sm hover:bg-surface-raised"
+        >
           View
         </button>
-        <button onClick={resetLayout} className="border border-slate-400 text-slate-600 px-3 py-1.5 rounded text-sm">
+        <button
+          onClick={resetLayout}
+          className="border border-border text-ink-muted px-3 py-1.5 rounded text-sm hover:text-ink hover:bg-surface-raised"
+        >
           Reset Layout
         </button>
         <a
           href={api.exportWorkspaceUrl(workspace._id)}
-          className="border border-green-700 text-green-700 px-3 py-1.5 rounded text-sm"
+          className="border border-verdigris text-verdigris px-3 py-1.5 rounded text-sm hover:bg-surface-raised"
         >
           Export to Excel
         </a>
@@ -580,7 +595,7 @@ export default function Canvas({ workspace, onView }) {
           <button
             onClick={handleSaveAll}
             disabled={saving}
-            className="bg-green-600 text-white px-3 py-1.5 rounded text-sm"
+            className="bg-verdigris text-canvas font-medium px-3 py-1.5 rounded text-sm disabled:opacity-60"
           >
             {saving ? "Saving…" : `Save (${draftDeeds.length} deed(s), ${pendingEdges.length} link(s))`}
           </button>
@@ -588,11 +603,11 @@ export default function Canvas({ workspace, onView }) {
       </div>
 
       {(error || duplicateDeedNumbers.length > 0 || edgeDraft) && (
-        <div className="px-4 py-3 border-b bg-white shrink-0 space-y-3">
-          {error && <p className="text-red-600 text-sm">{error}</p>}
+        <div className="px-4 py-3 border-b border-border bg-surface shrink-0 space-y-3">
+          {error && <p className="text-brick text-sm">{error}</p>}
 
           {duplicateDeedNumbers.length > 0 && (
-            <div className="border border-amber-400 bg-amber-50 text-amber-800 rounded p-3 text-sm">
+            <div className="border border-brass/40 bg-brass/10 text-brass rounded p-3 text-sm">
               <p className="font-medium mb-1">Duplicate deed number(s) in this workspace:</p>
               <ul className="list-disc list-inside">
                 {duplicateDeedNumbers.map(([num, group]) => (
@@ -606,30 +621,30 @@ export default function Canvas({ workspace, onView }) {
           )}
 
           {edgeDraft && (
-            <div className="border border-blue-400 bg-blue-50 rounded p-3 text-sm">
-              <p className="mb-2">
+            <div className="border border-brass bg-surface-raised rounded p-3 text-sm">
+              <p className="mb-2 text-ink">
                 <strong>{labelForKey(edgeDraft.targetKey)}</strong> derives from{" "}
                 <strong>{labelForKey(edgeDraft.sourceKey)}</strong>
               </p>
               <div className="flex gap-2 mb-2">
                 <input
-                  className="flex-1 border rounded px-2 py-1"
+                  className="flex-1 border border-border-strong bg-canvas text-ink placeholder:text-ink-faint rounded px-2 py-1 focus:outline-none focus:border-brass"
                   placeholder="Area/share transferred (optional)"
                   value={edgeDraft.areaTransferred}
                   onChange={(e) => setEdgeDraft({ ...edgeDraft, areaTransferred: e.target.value })}
                 />
                 <input
-                  className="flex-1 border rounded px-2 py-1"
+                  className="flex-1 border border-border-strong bg-canvas text-ink placeholder:text-ink-faint rounded px-2 py-1 focus:outline-none focus:border-brass"
                   placeholder="Note (optional)"
                   value={edgeDraft.note}
                   onChange={(e) => setEdgeDraft({ ...edgeDraft, note: e.target.value })}
                 />
               </div>
               <div className="flex gap-2">
-                <button onClick={confirmEdgeDraft} className="bg-blue-600 text-white px-3 py-1 rounded">
+                <button onClick={confirmEdgeDraft} className="bg-brass text-canvas font-medium px-3 py-1 rounded">
                   Add this link
                 </button>
-                <button onClick={() => setEdgeDraft(null)} className="px-3 py-1">
+                <button onClick={() => setEdgeDraft(null)} className="px-3 py-1 text-ink-muted hover:text-ink">
                   Cancel
                 </button>
               </div>
@@ -640,15 +655,19 @@ export default function Canvas({ workspace, onView }) {
 
       <div className="flex-1 min-h-0 flex overflow-hidden">
         {allCards.length === 0 ? (
-          <div className="flex-1 flex items-center justify-center text-slate-500 text-sm">
+          <div className="flex-1 flex items-center justify-center text-ink-faint text-sm">
             No deeds yet. Click "Add Deed" to start.
           </div>
         ) : (
           <div
             ref={scrollRef}
             onMouseDown={startPan}
-            className="flex-1 overflow-auto bg-slate-50"
-            style={{ cursor: isPanning ? "grabbing" : "grab" }}
+            className="flex-1 overflow-auto bg-canvas"
+            style={{
+              cursor: isPanning ? "grabbing" : "grab",
+              backgroundImage: "radial-gradient(#2b323c 1px, transparent 1px)",
+              backgroundSize: "26px 26px",
+            }}
           >
             {/* Outer sizing div matches the *scaled* content dimensions so the
                 scroll container's scrollbars/scroll range are correct at any
@@ -677,7 +696,10 @@ export default function Canvas({ workspace, onView }) {
                 >
                 <defs>
                   <marker id="arrowhead-edit" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
-                    <path d="M0,0 L8,4 L0,8 Z" fill="#64748b" />
+                    <path d="M0,0 L8,4 L0,8 Z" fill={WIRE_SAVED} />
+                  </marker>
+                  <marker id="arrowhead-edit-pending" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                    <path d="M0,0 L8,4 L0,8 Z" fill={WIRE_PENDING} />
                   </marker>
                 </defs>
 
@@ -690,15 +712,26 @@ export default function Canvas({ workspace, onView }) {
                   const x2 = b.top.x,
                     y2 = b.top.y;
                   const midY = (y1 + y2) / 2;
+                  const wireColor = e.saved ? WIRE_SAVED : WIRE_PENDING;
                   return (
                     <g key={e._id || `pending-${i}`}>
+                      {/* Soft duplicate underneath for the glow - same path,
+                          wider + blurred + translucent. */}
                       <path
                         d={`M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`}
                         fill="none"
-                        stroke={e.saved ? "#64748b" : "#f59e0b"}
-                        strokeWidth="2"
+                        stroke={wireColor}
+                        strokeWidth="5"
+                        opacity="0.16"
+                        style={{ filter: "blur(2px)" }}
+                      />
+                      <path
+                        d={`M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`}
+                        fill="none"
+                        stroke={wireColor}
+                        strokeWidth="1.6"
                         strokeDasharray={e.saved ? undefined : "5,4"}
-                        markerEnd="url(#arrowhead-edit)"
+                        markerEnd={e.saved ? "url(#arrowhead-edit)" : "url(#arrowhead-edit-pending)"}
                         style={{ pointerEvents: "stroke", cursor: "pointer" }}
                         onClick={() =>
                           e.saved
@@ -711,7 +744,7 @@ export default function Canvas({ workspace, onView }) {
                           x={(x1 + x2) / 2}
                           y={midY - 4}
                           fontSize="10"
-                          fill="#475569"
+                          fill={WIRE_LABEL}
                           textAnchor="middle"
                           style={{ pointerEvents: "none" }}
                         >
@@ -732,7 +765,7 @@ export default function Canvas({ workspace, onView }) {
                       <path
                         d={`M ${a.bottom.x} ${a.bottom.y} C ${a.bottom.x} ${midY}, ${dragPos.x} ${midY}, ${dragPos.x} ${dragPos.y}`}
                         fill="none"
-                        stroke="#2563eb"
+                        stroke={WIRE_LIVE_DRAG}
                         strokeWidth="2"
                         strokeDasharray="4,4"
                       />
@@ -771,7 +804,7 @@ export default function Canvas({ workspace, onView }) {
                         else topDotRefs.current.delete(key);
                       }}
                       title="Derives from (drop a link here)"
-                      className="w-4 h-4 rounded-full bg-slate-400 border-2 border-white shadow mx-auto"
+                      className="w-4 h-4 rounded-full bg-ink-faint border-2 border-canvas shadow mx-auto"
                       style={{ position: "absolute", top: -8, left: NODE_W / 2 - 8, zIndex: 5 }}
                     />
 
@@ -784,7 +817,7 @@ export default function Canvas({ workspace, onView }) {
                       }}
                       onMouseDown={startDrag(key)}
                       title="Drag to link this deed to one derived from it"
-                      className="w-4 h-4 rounded-full bg-blue-500 border-2 border-white shadow mx-auto cursor-grab active:cursor-grabbing"
+                      className="w-4 h-4 rounded-full bg-brass border-2 border-canvas shadow mx-auto cursor-grab active:cursor-grabbing"
                       style={{ position: "absolute", bottom: -8, left: NODE_W / 2 - 8, zIndex: 5 }}
                     />
                   </div>

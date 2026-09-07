@@ -14,6 +14,16 @@ const COL_GAP = 40;
 const ROW_GAP = 70;
 const PADDING = 30;
 
+// Mirrors tailwind.config.js's dark theme palette - see the comment on the
+// same constants in Canvas.jsx for why these are hardcoded hex rather than
+// Tailwind utility classes.
+const C_SURFACE = "#1b2027";
+const C_BORDER_STRONG = "#3a4350";
+const C_VERDIGRIS = "#4f9a8c";
+const C_BRASS_SOFT = "#a9723a";
+const C_INK = "#e9e6dc";
+const C_INK_MUTED = "#8d94a3";
+
 export default function LineageGraph({ workspace, onBack, initialSelectedId }) {
   const [deeds, setDeeds] = useState([]);
   const [relationships, setRelationships] = useState([]);
@@ -71,28 +81,28 @@ export default function LineageGraph({ workspace, onBack, initialSelectedId }) {
   if (deeds.length === 0) {
     return (
       <div className="max-w-6xl mx-auto py-8 px-4">
-        <p className="text-slate-500">No deeds in this workspace yet.</p>
+        <p className="text-ink-faint">No deeds in this workspace yet.</p>
       </div>
     );
   }
 
   return (
-    <div className="max-w-6xl mx-auto py-8 px-4">
+    <div className="max-w-6xl mx-auto py-8 px-4 text-ink">
       <div className="flex items-center justify-between mb-1">
-        <h2 className="text-lg font-semibold">{workspace.name} — Lineage</h2>
+        <h2 className="text-lg font-semibold font-serif">{workspace.name} — Lineage</h2>
         {onBack && (
-          <button onClick={onBack} className="text-sm text-blue-600 hover:underline">
+          <button onClick={onBack} className="text-sm text-brass hover:underline">
             ← Back to editing
           </button>
         )}
       </div>
-      <p className="text-sm text-slate-500 mb-4">
+      <p className="text-sm text-ink-faint mb-4">
         Arrows point from a source deed to the deed(s) derived from it. A deed with several
         incoming arrows converged from multiple sources; several outgoing arrows means it
         diverged into multiple later deeds. Click a deed to see its full details and lineage.
       </p>
       <div className="flex gap-4 items-start">
-        <div className="bg-white border rounded overflow-auto flex-1">
+        <div className="bg-surface border border-border rounded overflow-auto flex-1">
           <svg width={Math.max(width, 400)} height={Math.max(height, 200)}>
           <defs>
             <marker
@@ -103,7 +113,7 @@ export default function LineageGraph({ workspace, onBack, initialSelectedId }) {
               refY="4"
               orient="auto"
             >
-              <path d="M0,0 L8,4 L0,8 Z" fill="#64748b" />
+              <path d="M0,0 L8,4 L0,8 Z" fill={C_BRASS_SOFT} />
             </marker>
           </defs>
 
@@ -120,12 +130,12 @@ export default function LineageGraph({ workspace, onBack, initialSelectedId }) {
                 <path
                   d={`M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`}
                   fill="none"
-                  stroke="#64748b"
+                  stroke={C_BRASS_SOFT}
                   strokeWidth="1.5"
                   markerEnd="url(#arrowhead)"
                 />
                 {e.areaTransferred && (
-                  <text x={(x1 + x2) / 2} y={midY - 4} fontSize="10" fill="#475569" textAnchor="middle">
+                  <text x={(x1 + x2) / 2} y={midY - 4} fontSize="10" fill={C_INK_MUTED} textAnchor="middle">
                     {e.areaTransferred}
                   </text>
                 )}
@@ -151,14 +161,14 @@ export default function LineageGraph({ workspace, onBack, initialSelectedId }) {
                   width={NODE_W}
                   height={NODE_H}
                   rx="8"
-                  fill="#fff"
-                  stroke={selectedId === deed._id ? "#2563eb" : "#334155"}
+                  fill={C_SURFACE}
+                  stroke={selectedId === deed._id ? C_VERDIGRIS : C_BORDER_STRONG}
                   strokeWidth={selectedId === deed._id ? "2.5" : "1.5"}
                 />
-                <text x="10" y="22" fontSize="12" fontWeight="600" fill="#0f172a">
+                <text x="10" y="22" fontSize="12" fontWeight="600" fontFamily="Fraunces, serif" fill={C_INK}>
                   {(deedById.get(deed._id).deedInfo?.deedNumber || "(no deed no.)").slice(0, 22)}
                 </text>
-                <text x="10" y="40" fontSize="11" fill="#475569">
+                <text x="10" y="40" fontSize="11" fill={C_INK_MUTED}>
                   {(deedById.get(deed._id).purchasers?.[0]?.name || "").slice(0, 24)}
                 </text>
               </g>
@@ -168,11 +178,11 @@ export default function LineageGraph({ workspace, onBack, initialSelectedId }) {
         </div>
 
         {selectedDeed && (
-          <div className="w-80 shrink-0 bg-white border rounded p-4 text-sm">
+          <div className="w-80 shrink-0 bg-surface border border-border rounded p-4 text-sm">
             <div className="flex items-start justify-between mb-2">
-              <h3 className="font-semibold">{deedLabel(selectedDeed)}</h3>
+              <h3 className="font-semibold font-serif">{deedLabel(selectedDeed)}</h3>
               <button
-                className="text-slate-400 hover:text-slate-700 text-xs"
+                className="text-ink-faint hover:text-ink text-xs"
                 onClick={() => setSelectedId(null)}
               >
                 ✕
@@ -181,7 +191,7 @@ export default function LineageGraph({ workspace, onBack, initialSelectedId }) {
 
             <dl className="space-y-1 mb-3">
               <div>
-                <dt className="text-xs text-slate-500">Deed No. / Volume / Page / Office</dt>
+                <dt className="text-xs text-ink-faint">Deed No. / Volume / Page / Office</dt>
                 <dd>
                   {selectedDeed.deedInfo?.deedNumber || "—"} /{" "}
                   {selectedDeed.deedInfo?.volumeNumber || "—"} /{" "}
@@ -190,32 +200,32 @@ export default function LineageGraph({ workspace, onBack, initialSelectedId }) {
                 </dd>
               </div>
               <div>
-                <dt className="text-xs text-slate-500">Purchasers</dt>
+                <dt className="text-xs text-ink-faint">Purchasers</dt>
                 <dd>{selectedDeed.purchasers?.map((p) => p.name).filter(Boolean).join(", ") || "—"}</dd>
               </div>
               <div>
-                <dt className="text-xs text-slate-500">Sellers</dt>
+                <dt className="text-xs text-ink-faint">Sellers</dt>
                 <dd>{selectedDeed.sellers?.map((s) => s.name).filter(Boolean).join(", ") || "—"}</dd>
               </div>
               <div>
-                <dt className="text-xs text-slate-500">Mouja / Sheet No.</dt>
+                <dt className="text-xs text-ink-faint">Mouja / Sheet No.</dt>
                 <dd>
                   {selectedDeed.landParcels?.map((lp) => lp.mouja).filter(Boolean).join(", ") || "—"} /{" "}
                   {selectedDeed.landParcels?.map((lp) => lp.sheetNo).filter(Boolean).join(", ") || "—"}
                 </dd>
               </div>
               <div>
-                <dt className="text-xs text-slate-500">Total Area</dt>
+                <dt className="text-xs text-ink-faint">Total Area</dt>
                 <dd>{selectedDeed.landParcels?.map((lp) => lp.area).filter(Boolean).join(", ") || "—"}</dd>
               </div>
             </dl>
 
-            <div className="border-t pt-2 mb-2">
-              <p className="text-xs font-semibold text-slate-500 mb-1">
+            <div className="border-t border-border pt-2 mb-2">
+              <p className="text-xs font-semibold text-ink-faint mb-1">
                 Sourced from ({incoming.length})
               </p>
               {incoming.length === 0 ? (
-                <p className="text-xs text-slate-400">This is a root deed — no earlier source.</p>
+                <p className="text-xs text-ink-faint">This is a root deed — no earlier source.</p>
               ) : (
                 <ul className="space-y-1">
                   {incoming.map((r) => {
@@ -223,7 +233,7 @@ export default function LineageGraph({ workspace, onBack, initialSelectedId }) {
                     return (
                       <li key={r._id}>
                         <button
-                          className="text-blue-600 hover:underline text-left"
+                          className="text-brass hover:underline text-left"
                           onClick={() => setSelectedId(String(r.sourceDeedId))}
                         >
                           {src ? deedLabel(src) : "(deleted deed)"}
@@ -236,12 +246,12 @@ export default function LineageGraph({ workspace, onBack, initialSelectedId }) {
               )}
             </div>
 
-            <div className="border-t pt-2">
-              <p className="text-xs font-semibold text-slate-500 mb-1">
+            <div className="border-t border-border pt-2">
+              <p className="text-xs font-semibold text-ink-faint mb-1">
                 Derived into ({outgoing.length})
               </p>
               {outgoing.length === 0 ? (
-                <p className="text-xs text-slate-400">No later deeds derive from this one yet.</p>
+                <p className="text-xs text-ink-faint">No later deeds derive from this one yet.</p>
               ) : (
                 <ul className="space-y-1">
                   {outgoing.map((r) => {
@@ -249,7 +259,7 @@ export default function LineageGraph({ workspace, onBack, initialSelectedId }) {
                     return (
                       <li key={r._id}>
                         <button
-                          className="text-blue-600 hover:underline text-left"
+                          className="text-brass hover:underline text-left"
                           onClick={() => setSelectedId(String(r.targetDeedId))}
                         >
                           {tgt ? deedLabel(tgt) : "(deleted deed)"}

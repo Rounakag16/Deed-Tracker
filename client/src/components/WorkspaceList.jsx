@@ -69,31 +69,31 @@ export default function WorkspaceList({ onOpen }) {
 
   return (
     <div className="max-w-2xl mx-auto py-12 px-4">
-      <h1 className="text-2xl font-bold mb-6">DeedTracker — Workspaces</h1>
+      <h1 className="text-2xl font-semibold font-serif mb-6">DeedTracker — Workspaces</h1>
 
       <form onSubmit={handleCreate} className="flex gap-2 mb-8">
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="New workspace name (e.g. '100-acre Sundarban tract')"
-          className="flex-1 border rounded px-3 py-2"
+          className="flex-1 border border-border-strong bg-surface text-ink placeholder:text-ink-faint rounded px-3 py-2 focus:outline-none focus:border-brass"
         />
-        <button className="bg-slate-900 text-white px-4 py-2 rounded hover:bg-slate-700">
+        <button className="bg-brass text-canvas font-medium px-4 py-2 rounded hover:bg-brass-soft">
           Create
         </button>
       </form>
 
-      {error && <p className="text-red-600 mb-4">{error}</p>}
+      {error && <p className="text-brick mb-4">{error}</p>}
       {loading ? (
-        <p>Loading…</p>
+        <p className="text-ink-muted">Loading…</p>
       ) : workspaces.length === 0 ? (
-        <p className="text-slate-500">No workspaces yet — create one above.</p>
+        <p className="text-ink-faint">No workspaces yet — create one above.</p>
       ) : (
         <ul className="space-y-2">
           {workspaces.map((w) => (
             <li
               key={w._id}
-              className="flex items-center justify-between bg-white border rounded px-4 py-3"
+              className="flex items-center justify-between bg-surface border border-border rounded px-4 py-3"
             >
               {renamingId === w._id ? (
                 <form
@@ -107,12 +107,12 @@ export default function WorkspaceList({ onOpen }) {
                     autoFocus
                     value={renameValue}
                     onChange={(e) => setRenameValue(e.target.value)}
-                    className="flex-1 border rounded px-2 py-1"
+                    className="flex-1 border border-border-strong bg-canvas text-ink rounded px-2 py-1 focus:outline-none focus:border-brass"
                   />
-                  <button className="text-sm text-green-700 hover:underline">Save</button>
+                  <button className="text-sm text-verdigris hover:underline">Save</button>
                   <button
                     type="button"
-                    className="text-sm text-slate-500 hover:underline"
+                    className="text-sm text-ink-muted hover:underline"
                     onClick={() => setRenamingId(null)}
                   >
                     Cancel
@@ -121,7 +121,7 @@ export default function WorkspaceList({ onOpen }) {
               ) : (
                 <button
                   onClick={() => onOpen(w)}
-                  className="text-left font-medium hover:underline"
+                  className="text-left font-medium font-serif hover:underline"
                 >
                   {w.name}
                 </button>
@@ -130,13 +130,13 @@ export default function WorkspaceList({ onOpen }) {
                 <div className="flex gap-3">
                   <button
                     onClick={() => startRename(w)}
-                    className="text-slate-500 text-sm hover:underline"
+                    className="text-ink-muted text-sm hover:underline"
                   >
                     Rename
                   </button>
                   <button
                     onClick={() => handleDelete(w._id)}
-                    className="text-red-600 text-sm hover:underline"
+                    className="text-brick text-sm hover:underline"
                   >
                     Delete
                   </button>
@@ -152,17 +152,17 @@ export default function WorkspaceList({ onOpen }) {
           <button
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={page <= 1}
-            className="px-3 py-1 border rounded disabled:opacity-40"
+            className="px-3 py-1 border border-border text-ink-muted rounded disabled:opacity-40"
           >
             ← Prev
           </button>
-          <span className="text-slate-500">
+          <span className="text-ink-faint">
             Page {page} of {totalPages} ({total} workspace{total === 1 ? "" : "s"})
           </span>
           <button
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             disabled={page >= totalPages}
-            className="px-3 py-1 border rounded disabled:opacity-40"
+            className="px-3 py-1 border border-border text-ink-muted rounded disabled:opacity-40"
           >
             Next →
           </button>

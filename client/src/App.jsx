@@ -30,18 +30,18 @@ export default function App() {
 
   return (
     <div className="h-screen flex flex-col">
-      <div className="bg-white border-b shrink-0">
+      <div className="bg-surface border-b border-border shrink-0">
         <div className="max-w-6xl mx-auto px-4 flex items-center gap-4">
           <button
             onClick={() => setWorkspace(null)}
-            className="text-sm text-slate-500 hover:underline py-3"
+            className="text-sm text-ink-faint hover:text-ink-muted py-3"
           >
             ← All workspaces
           </button>
           <button
             onClick={() => setTab("canvas")}
             className={`py-3 border-b-2 text-sm px-2 ${
-              tab === "canvas" ? "border-slate-900 font-medium" : "border-transparent text-slate-500"
+              tab === "canvas" ? "border-brass font-medium text-ink" : "border-transparent text-ink-muted hover:text-ink"
             }`}
           >
             Workspace
@@ -49,7 +49,7 @@ export default function App() {
           <button
             onClick={() => setTab("search")}
             className={`py-3 border-b-2 text-sm px-2 ${
-              tab === "search" ? "border-slate-900 font-medium" : "border-transparent text-slate-500"
+              tab === "search" ? "border-brass font-medium text-ink" : "border-transparent text-ink-muted hover:text-ink"
             }`}
           >
             Search

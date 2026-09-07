@@ -54,18 +54,18 @@ export default function DeedSidebar({ deed, isDraft, onChange, onSave, onDelete,
   const buyer = displayDeed.purchasers?.[0]?.name;
 
   return (
-    <div className="w-96 shrink-0 border-l bg-white flex flex-col">
-      <div className="flex items-start justify-between p-4 border-b shrink-0">
+    <div className="w-96 shrink-0 border-l border-border bg-surface flex flex-col text-ink">
+      <div className="flex items-start justify-between p-4 border-b border-border shrink-0">
         <div className="min-w-0">
-          <p className="font-semibold truncate">
-            {summary} {isDraft && <span className="text-amber-600 text-xs">(unsaved)</span>}
+          <p className="font-semibold font-serif truncate">
+            {summary} {isDraft && <span className="text-brass text-xs font-sans font-normal">(unsaved)</span>}
           </p>
-          {buyer && <p className="text-xs text-slate-500 truncate">Buyer: {buyer}</p>}
-          {!isDraft && dirty && <p className="text-xs text-amber-600 mt-0.5">Unsaved changes</p>}
+          {buyer && <p className="text-xs text-ink-muted truncate mt-0.5">Buyer: {buyer}</p>}
+          {!isDraft && dirty && <p className="text-xs text-brass mt-0.5">Unsaved changes</p>}
         </div>
         <button
           onClick={onClose}
-          className="text-slate-400 hover:text-slate-700 text-sm shrink-0 ml-2"
+          className="text-ink-faint hover:text-ink text-sm shrink-0 ml-2"
           title="Close"
         >
           ✕
@@ -76,12 +76,12 @@ export default function DeedSidebar({ deed, isDraft, onChange, onSave, onDelete,
         <DeedForm deed={displayDeed} onChange={handleFormChange} />
       </div>
 
-      <div className="flex items-center gap-2 p-4 border-t shrink-0">
+      <div className="flex items-center gap-2 p-4 border-t border-border shrink-0">
         {!isDraft && dirty && (
           <>
             <button
               type="button"
-              className="bg-green-600 text-white text-sm px-3 py-1.5 rounded"
+              className="bg-verdigris text-canvas font-medium text-sm px-3 py-1.5 rounded disabled:opacity-60"
               onClick={handleSaveClick}
               disabled={saving}
             >
@@ -89,7 +89,7 @@ export default function DeedSidebar({ deed, isDraft, onChange, onSave, onDelete,
             </button>
             <button
               type="button"
-              className="text-sm px-3 py-1.5 border rounded"
+              className="text-sm px-3 py-1.5 border border-border text-ink-muted hover:text-ink rounded"
               onClick={handleDiscardClick}
             >
               Discard
@@ -97,7 +97,7 @@ export default function DeedSidebar({ deed, isDraft, onChange, onSave, onDelete,
           </>
         )}
         <div className="flex-1" />
-        <button type="button" className="text-red-600 text-sm hover:underline" onClick={onDelete}>
+        <button type="button" className="text-brick text-sm hover:underline" onClick={onDelete}>
           Delete
         </button>
       </div>
