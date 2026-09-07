@@ -16,17 +16,28 @@ function deedLabel(deed) {
 // Walk upstream from a deed to find every root ancestor (a deed with no
 // incoming edges). A deed can have several if it converged from multiple
 // sources.
-function findRootAncestors(deedId, parentsByDeed, cache = new Map()) {
+//
+// `visiting` guards against a cycle turning this into infinite recursion.
+// The relationships route rejects cycles at write time, so this shouldn't
+// be reachable through normal use of the app - but export reads whatever is
+// actually in the database, and defending it here is cheap insurance
+// against a stack-overflow 500 if data ever gets into an inconsistent state
+// some other way (a direct DB edit, a future bug, an imported dataset).
+function findRootAncestors(deedId, parentsByDeed, cache = new Map(), visiting = new Set()) {
   if (cache.has(deedId)) return cache.get(deedId);
+  if (visiting.has(deedId)) return []; // mid-cycle - contributes no new root from this branch
+  visiting.add(deedId);
   const parents = parentsByDeed.get(deedId) || [];
   if (parents.length === 0) {
+    visiting.delete(deedId);
     cache.set(deedId, [deedId]);
     return [deedId];
   }
   const roots = new Set();
   for (const p of parents) {
-    for (const r of findRootAncestors(p, parentsByDeed, cache)) roots.add(r);
+    for (const r of findRootAncestors(p, parentsByDeed, cache, visiting)) roots.add(r);
   }
+  visiting.delete(deedId);
   const result = [...roots];
   cache.set(deedId, result);
   return result;

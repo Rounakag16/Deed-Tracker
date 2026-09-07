@@ -23,6 +23,17 @@ const TOPIC_FIELDS = {
 const DEFAULT_LIMIT = 25;
 const MAX_LIMIT = 100;
 
+// Field-scoped search builds a RegExp directly from user input. Land-record
+// values routinely contain regex metacharacters that are meaningful
+// characters in this domain, not markup - a khatiya number like "45(a)", a
+// decimal area like "2.5", a plot note like "3+4" - so escape them before
+// constructing the RegExp. Without this, searching for any of the above
+// either throws (unbalanced "(" is an invalid pattern -> 500) or silently
+// matches more than intended ("." matching any character).
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 // GET /api/search?q=...&topic=all|purchaser|seller|...&workspaceId=optional&page=1&limit=25
 //
 // topic=all uses Mongo's $text operator against the compound text index
@@ -61,7 +72,7 @@ router.get(
         .limit(limit);
       total = await Deed.countDocuments(filter);
     } else {
-      const regex = new RegExp(q.trim(), "i");
+      const regex = new RegExp(escapeRegex(q.trim()), "i");
       filter.$or = TOPIC_FIELDS[topic].map((field) => ({ [field]: regex }));
       query = Deed.find(filter)
         .skip((page - 1) * limit)

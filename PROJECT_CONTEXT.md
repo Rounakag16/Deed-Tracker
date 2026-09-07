@@ -420,6 +420,18 @@ client will need a login flow added ahead of `WorkspaceList.jsx`.
   Code, so all changes are delivered as git-apply-able `.diff` files rather
   than direct repo access, built and reviewed against a local scratch copy
   of the repo before being handed over.
+- **Visual direction: dark "data-flow" redesign, chosen over the original
+  light Tailwind UI.** The user shared a dribbble.com reference (Mateusz
+  Wozniak's "Dynamic Data Flow" shot for widelab) as the target aesthetic -
+  dark canvas, draggable/directional-flow-styled nodes, side panel for
+  editing the selected node's properties. That maps onto this app's
+  existing `Canvas.jsx`/`DeedSidebar.jsx` structure closely enough that
+  it's expected to be a visual reskin (colors, connector-wire styling, card
+  chrome) rather than an architecture change. Sequencing: a bug-fix/audit
+  pass first (diff `0014`), then the redesign - the user explicitly chose
+  this order so styling work isn't built on top of, then redone around,
+  latent bugs. Deployment was explicitly deprioritized for now ("we have a
+  lot of time").
 
 ## Current Project Status
 
@@ -444,17 +456,51 @@ client will need a login flow added ahead of `WorkspaceList.jsx`.
 - No automated tests exist anywhere in the repo (manual/static review only,
   and as of the last conversation turn the user had not yet run the app
   end-to-end against a live MongoDB instance)
+- A full static-audit pass was done in diff `0014`'s session, reading every
+  route and component (not just the ones touched by recent diffs) and
+  unit-testing the pure logic that could be tested without a live DB/
+  browser (`layout.js`'s `computeLayers`/`computePositions`, and the two
+  fixes below) with standalone Node scripts. This is real verification of
+  that logic in isolation, but still not the same as a live end-to-end
+  pass - see Known Issues for what it found/fixed.
 
 **Not implemented:**
 - Authentication/authorization (explicitly deferred, see Important
   Decisions)
 - Any deployment/hosting configuration (no Dockerfile, no CI, no
-  production build/serve setup beyond `vite build`)
+  production build/serve setup beyond `vite build`) - explicitly
+  deprioritized by the user for now ("we have a lot of time")
 - Bulk import (e.g. migrating data out of the old Firebase version)
 - Any confirmation/undo beyond native `confirm()` dialogs
+- **Dark "data-flow" visual redesign** - chosen this session (inspired by
+  a dribbble.com reference the user shared) as the target look for the
+  canvas/node UI, but not yet built. See Important Decisions.
 
 ## Known Issues
 
+- **[FIXED] Field-scoped search (`GET /search?topic=...`) crashed with a 500
+  on any query containing regex metacharacters.** `search.js` built a
+  `RegExp` directly from the raw `q` query param. Land-record values
+  routinely contain characters that are regex-special but domain-meaningful
+  here - a khatiya number like `45(a)`, a decimal area like `2.5`, a plot
+  note like `3+4` - and a search-as-you-type flow will pass through
+  intermediate states that are outright invalid regex (`45(a` before the
+  user finishes typing the `)`). Found by static audit + a standalone unit
+  test (not a live repro), fixed in diff `0014` by escaping regex
+  metacharacters in the query before constructing the `RegExp`. `topic=all`
+  (the `$text`-index path) was never affected - only the per-field regex
+  path.
+- **[FIXED, defensive] `export.js`'s `findRootAncestors` had no cycle guard.**
+  Cycles are rejected at write time by `relationships.js`, so this should
+  be structurally unreachable through normal use - but export reads
+  whatever is actually in the database, and unbounded recursion into an
+  inconsistent/cyclic dataset (a direct DB edit, a future bug, imported
+  data) would stack-overflow the whole export request. Fixed in diff
+  `0014` with the same `visiting`-set pattern `layout.js`'s `computeLayers`
+  already uses. Verified with a standalone unit test using a deliberately
+  cyclic graph (returns gracefully instead of crashing); normal
+  converging/diverging graphs were also re-verified to produce the same
+  root-ancestor results as before the change.
 - **[FIXED] Canvas crashed with "Maximum update depth exceeded" on load,
   reintroduced by diff `0011`, fixed by diff `0013`.** `0011` put
   `recomputeCardHeights` (which sets `cardHeights`) in the same

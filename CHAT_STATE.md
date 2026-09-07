@@ -2,174 +2,173 @@
 
 ## Current Objective
 
-Same chat, direct codebase access via re-uploaded zip, diff-delivery
-workflow. After diff `0012` shipped (sidebar redesign), the user
-live-tested it and hit a hard crash on load: blank page, console showing
-React's "Maximum update depth exceeded" pointing at `Canvas.jsx`'s
-`setAnchors` call inside the anchor-measurement `useLayoutEffect`. This
-turn (diff `0013`) is that crash fix.
+New chat session (zip re-uploaded fresh; no continuity of prior chat
+context beyond what's written in this file and PROJECT_CONTEXT.md). Goal
+for this session, per the user: review the codebase, then plan and build
+whatever's needed to move DeedTracker toward a finished product. Two
+decisions were settled before work started:
+
+1. **Visual direction**: redesign toward a dark "data-flow" aesthetic (see
+   PROJECT_CONTEXT.md's Important Decisions for the dribbble.com
+   reference and how it maps onto the existing Canvas/Sidebar structure).
+2. **Priority order** (Claude's recommendation, user agreed): audit/fix
+   first, then the visual redesign. Deployment was explicitly
+   deprioritized by the user ("don't worry about deployment, we have a
+   lot of time"). Delivery method: sticking with `.diff` files (cheaper
+   in tokens than full-file rewrites, matches the existing numbered
+   sequence).
 
 ## Work Completed In This Chat
 
-**Diffs `0011`/`0012`** (previous turns, recap): row-overlap fix + PUT
-hardening, then the full sidebar redesign moving deed editing off the
-canvas card. See those diffs and `PROJECT_CONTEXT.md` for detail.
+**Repo verification**: the re-uploaded zip's working tree showed nearly
+every file as "modified" in `git status`. Diagnosed as pure CRLF-vs-LF
+noise (the zip has CRLF line endings, the git blobs are LF) - not real
+content drift. Fixed locally with `git config core.autocrlf false` +
+`git checkout -- .`, confirmed clean afterward. The code is exactly
+commit `0dec3c5` (diff `0013`, the render-loop crash fix) - nothing lost
+or drifted since the last session.
 
-**Diff `0013`** (this turn): fixed the render-loop crash the user hit
-immediately after applying `0012`. Root cause, found by reading (no live
-repro was needed or possible - see Debugging Already Done): diff `0011`
-put `recomputeCardHeights` (which calls `setCardHeights`) inside the same
-`useLayoutEffect` as `recomputeAnchors`, and keyed that effect on
-`autoPositions` - a value *derived from* `cardHeights` via a `useMemo`.
-That's a self-feeding effect: every `cardHeights` update produces a new
-`autoPositions` reference, which re-runs the effect, which can produce
-another `cardHeights` update. The existing equality guards
-(`heightsEqual`/`anchorsEqual`) catch *spurious* re-fires where nothing
-really changed, but not a case where successive real DOM measurements
-legitimately differ from pass to pass (which is exactly what a growing/
-shrinking row does, by construction, while it's still stabilizing) - so
-in practice this became a genuine infinite loop, not just an inefficient
-one.
+**Security note (not a code change)**: `server/.env` in the zip contains
+a live MongoDB Atlas connection string with real credentials. Confirmed
+via `git log --all --full-history` that `.env` was never committed
+(`.gitignore` correctly excludes it) - not leaked in the repo/GitHub.
+Flagged to the user directly in chat as a heads-up (don't share this zip
+around; rotate the password if in doubt), no fix needed in the repo
+itself.
 
-Fix: split the one effect into two. `recomputeAnchors` keeps reacting to
-`autoPositions` changing (still needed - wires must follow rows that
-grew/shrank). `recomputeCardHeights` moved to its own effect keyed only on
-`allKeys` (fires on mount and when cards are added/removed) - it no
-longer has any dependency on its own derived output, so the cycle is now
-structurally impossible, not just guarded against. The `ResizeObserver`
-effect (unchanged) still independently catches a genuine size change to
-an *existing* card via the browser's native resize signal, which carries
-no React-dependency-cycle risk either way, so nothing was lost by
-narrowing the `useLayoutEffect`'s trigger.
+**Full static audit** (this is diff `0014`): read every route file and
+every component (not just ones recent diffs touched), specifically to
+close out the "never live-tested" backlog items from the last session
+(relationships/cycles, search, export, lineage view). Also unit-tested
+the pure logic that doesn't need a live DB/browser, with standalone Node
+scripts run in this sandbox:
+- `layout.js`'s `computeLayers`/`computePositions` - tested a
+  converging+diverging graph, an empty graph, an isolated node, and a
+  dangling parent reference (a relationship pointing at a deed not in the
+  current id set). All correct, no changes needed.
+- Found and fixed two real issues (see PROJECT_CONTEXT.md's Known Issues
+  for full detail, since these are permanent project-level facts, not
+  just this-chat facts):
+  1. `search.js`'s field-scoped search built a `RegExp` directly from raw
+     user input - crashes (500) on inputs that are invalid as regex
+     (`45(a`, `khatiya[12`, `*5`, etc.), which are plausible real inputs
+     in this domain (khatiya/plot numbers, decimal areas) and *especially*
+     plausible mid-typing in a live search box. Fixed by escaping regex
+     metacharacters before constructing the `RegExp`. Verified with a
+     standalone script showing the exact same inputs throw before the fix
+     and don't after, and still match sensibly.
+  2. `export.js`'s `findRootAncestors` recursion had no cycle guard - not
+     reachable through normal use (cycles are rejected at write time) but
+     unbounded recursion into somehow-inconsistent data would crash the
+     whole export. Added the same `visiting`-set guard `layout.js` already
+     uses elsewhere. Verified with a script confirming a deliberately
+     cyclic input graph returns gracefully (no stack overflow) and normal
+     converging/diverging graphs produce identical output to before.
+- Everything else read (Canvas.jsx's drag/save/anchor-measurement logic,
+  relationships.js's cycle-prevention BFS, DeedSidebar.jsx's edit-
+  buffering, DeedForm.jsx, WorkspaceList.jsx, App.jsx, all models) checked
+  out correct on static review - no further changes made. In particular,
+  Express's router-mounting order in `server.js` (workspacesRouter mounted
+  at a prefix that nested routers' full paths also fall under) was
+  double-checked for a route-collision bug and confirmed safe: `/:id`
+  only matches a single path segment, so requests like
+  `/api/workspaces/:id/deeds` correctly fall through to the nested router.
 
-Also added a `[FIXED]` entry to `PROJECT_CONTEXT.md`'s Known Issues
-explaining this, since the fix comment in `Canvas.jsx` itself references
-it.
+## Files Changed (diff `0014`)
 
-## Files Changed (diff `0013`)
-
-- `client/src/components/Canvas.jsx` - split the coupled
-  `useLayoutEffect` into two independent ones (see above). No other
-  changes.
-- `PROJECT_CONTEXT.md` - new Known Issues entry.
-
-Everything else is unchanged from diff `0012`'s state.
+- `server/src/routes/search.js` - added `escapeRegex()`, used it when
+  building the field-scoped search `RegExp`.
+- `server/src/routes/export.js` - added a `visiting` Set param to
+  `findRootAncestors` as a cycle guard.
+- `PROJECT_CONTEXT.md` - two new Known Issues entries (both marked
+  `[FIXED]`), a note in Current Project Status about this session's audit,
+  and a new Important Decisions entry recording the visual-direction
+  choice and priority ordering.
 
 ## Current Implementation State
 
-Diffs `0001`-`0010` remain confirmed live-working (the user's `0012`
-bug report was specific to the new sidebar-era code, not a regression in
-anything from `0009`/`0010`). Diff `0011`'s actual row-height-growing
-logic was never confirmed live working in isolation (superseded by `0012`
-before that retest happened) - not a concern on its own since `0012`
-made most of that logic dormant anyway (fixed-height cards rarely
-exercise it), but worth remembering if a future bug ever traces back into
-`autoPositions`/`rowLayoutHeight`. Diff `0012` is now confirmed live in
-the sense that the user actually ran it and hit a real, specific,
-reproducible bug (good - that's a stronger signal than another round of
-static review would give). Diff `0013` (this turn) is, like every prior
-diff, only statically verified in this sandbox (syntax check +
-`git apply --check` in sequence) - genuinely uncertain until the user
-retests, though this fix eliminates the cycle structurally rather than
-patching around a symptom, so confidence is higher than usual for an
-unverified fix.
+Diffs `0001`-`0013` unchanged from last session (see PROJECT_CONTEXT.md).
+Diff `0014` (this session) is verified two ways that weren't available
+for most prior diffs: standalone unit tests of the exact changed logic
+(not just static read-through), run directly in this sandbox with Node -
+higher confidence than a typical unverified diff, though still not a live
+end-to-end app test (no live browser/network/MongoDB access in this
+sandbox - same standing constraint as every prior session).
 
 ## Problems / Errors
 
-1. **[Fixed by diff `0013`, not yet re-tested]** "Maximum update depth
-   exceeded" crash on load after applying diff `0012` - see Work
-   Completed above for the root cause and fix.
-2. The unidentified benign `404` from the very first live test (mentioned
-   in earlier `CHAT_STATE.md` revisions) is still unaddressed - no update
-   this turn either, still only worth investigating if it recurs
-   independently and is reported again.
+None outstanding from this session. The two bugs found by the audit were
+fixed within the same turn (see Work Completed above).
 
 ## Debugging Already Done
 
-The user's report included the exact browser console stack trace, which
-was enough to pinpoint the bug without needing a live repro: the trace
-showed `dispatchSetState` originating at `Canvas.jsx:231` (the `setAnchors`
-call inside `recomputeAnchors`) called from `Canvas.jsx:249` (the
-`useLayoutEffect` body that invokes it) - i.e. the *anchors* update was
-what React flagged as looping, not the card-heights update directly. That
-pointed straight at the effect's dependency array rather than at
-`recomputeAnchors`'s own logic (unchanged since diff `0010`, not touched
-by `0011`/`0012`). From there, tracing what changed about that effect
-between `0010` and `0011` (its dependency swapped from the stable
-`positions` memo to the `cardHeights`-derived `autoPositions` memo, and
-`recomputeCardHeights` got folded into the same effect body) was enough
-to identify the exact cycle without running anything. This is a good
-example of why sending the full console stack trace (not just "it
-crashed") is valuable - it turned what could've been a guessing exercise
-into a precise fix.
+See "Full static audit" under Work Completed above for the two real bugs
+found and how each was verified (standalone Node scripts, not a live
+repro - none was needed since these were found by reading + testing pure
+logic in isolation, not by chasing a reported crash).
 
 ## Important Decisions Made
 
-No new architectural decisions this turn - this is a bug fix within the
-architecture `0011`/`0012` already established (see `PROJECT_CONTEXT.md`'s
-Important Decisions for those). Worth noting for a future session: this
-is the *second* time a `useLayoutEffect`/`ResizeObserver` measurement
-loop has caused a real production crash in this file (diff `0010` fixed
-the first one, a different mechanism - unbounded content-box growth, not
-a measurement cycle). If a third one shows up, it's worth stepping back
-and asking whether `Canvas.jsx`'s DOM-measurement architecture as a whole
-needs a more defensive pattern (e.g. a shared "stabilization" utility with
-an iteration cap) rather than fixing each cycle ad hoc as it's found -
-not warranted yet after two, but worth flagging if a pattern continues.
+See PROJECT_CONTEXT.md's Important Decisions for the two lasting ones
+(visual direction, audit-before-redesign ordering) - recorded there since
+they're permanent project facts, not just this-chat context.
 
 ## Current Code/Architecture Considerations
 
-- **Two separate `useLayoutEffect`s for `recomputeAnchors` and
-  `recomputeCardHeights` is now load-bearing, not a style choice** - see
-  the comment in `Canvas.jsx` and the Known Issues entry in
-  `PROJECT_CONTEXT.md`. Do not merge them back into one effect keyed on
-  `autoPositions` without re-deriving why that's unsafe (see Work
-  Completed above).
+- No architecture changes this session - diff `0014` is two narrowly
+  scoped correctness fixes, not a refactor.
+- The dark redesign (next phase) is expected to touch `Canvas.jsx`,
+  `DeedCard.jsx`, `DeedSidebar.jsx`, `LineageGraph.jsx`, `WorkspaceList.jsx`,
+  `App.jsx`, and `tailwind.config.js` / `index.css` for a dark palette -
+  i.e. most of the client, but per PROJECT_CONTEXT.md's Important
+  Decisions, expected to be styling/color/connector-rendering changes
+  layered onto the existing component structure, not a rearchitecture.
 - Still no live browser/network/MongoDB access in this sandbox - unchanged
-  constraint, carried over from every prior turn.
-- The scratch working copies for this chat
-  (`/home/claude/work/DeedTracker`, `/tmp/patchrepo3`) are local to this
-  sandbox and won't persist to a future chat.
+  constraint, carried over from every prior session.
+- The scratch working copy for this chat (`/home/claude/work/DeedTracker`)
+  is local to this sandbox and won't persist to a future chat - a fresh
+  zip re-upload will be needed next time, as before.
 
 ## Pending Work
 
-- **Re-test live**, starting with just confirming the app loads without
-  crashing at all (the immediate regression this diff fixes), then
-  resuming the sidebar-flow smoke test from diff `0012`'s hand-off (add a
-  deed → sidebar opens automatically → edit/switch-cards confirmation →
-  save persists → delete closes sidebar → canvas never visibly
-  resizes/reflows → pan/zoom/scroll work with sidebar open), then the
-  original checklist pending since diff `0009` (relationships/cycles,
-  Search, Lineage/View, Excel export).
+- **The dark "data-flow" visual redesign** - next up this session.
+- **Live re-test**, whenever the user runs the app against their real
+  MongoDB instance: start with the diff `0013` crash fix (still not
+  confirmed live as of this session), then the diff `0014` fixes, then
+  the original smoke-test checklist (relationships/cycles, Search,
+  Lineage/View, Excel export) that's been pending since diff `0009`.
 - Authentication (explicitly deferred, only add if asked).
-- Deployment/hosting setup (none exists).
+- Deployment/hosting setup (explicitly deprioritized this session - "we
+  have a lot of time").
 - Bulk import from the old Firebase version (never requested).
 - Format validation beyond deed number (not requested).
-- The unidentified benign 404 from the first live test - only worth
-  investigating if it recurs independently.
+- The unidentified benign 404 from the first live test, several sessions
+  ago (only worth investigating if it recurs independently and is
+  reported again).
 
 ## Exact Next Steps
 
-1. Present diff `0013` (crash fix, bundled with the `PROJECT_CONTEXT.md`
-   Known Issues update) with exact `git apply`/`git add -A`/`git commit`/
-   `git push` instructions, noting it applies after `0011` and `0012`.
-2. Ask the user to confirm the app loads without crashing, then resume
-   the sidebar-flow smoke test from diff `0012`'s hand-off.
-3. Whatever breaks next, get the exact error/behavior (ideally with the
-   full console stack trace again, like this turn - it made this fix much
-   faster and more precise than a guess would have been) and fix it as
-   diff `0014`.
-4. Once smoke-tested clean, return to the open backlog (auth, deployment,
-   bulk import) only as the user prioritizes it.
+1. Present diff `0014` (search-regex fix + export cycle-guard, bundled
+   with the PROJECT_CONTEXT.md updates) with exact `git apply`/`git
+   add -A`/`git commit`/`git push` instructions, noting it applies after
+   `0013`.
+2. Move into the dark "data-flow" visual redesign - likely its own
+   diff(s), numbered `0015` onward.
+3. Once the user has a chance to run the app live, get real bug reports
+   (ideally with console stack traces, as instructed previously - that
+   made diff `0013` far faster/more precise than guessing would have)
+   and fix as they come in.
 
 ## User Requirements For The Current Task
 
 - Always deliver changes as `.diff` files (git-apply-able), never full
   file rewrites, never assume Claude Code / direct repo access.
 - Keep diff numbering sequential and continuous across the whole project
-  (currently through `0013`).
+  (currently through `0014`).
 - Give exact shell commands for applying each diff every time.
 - `CHAT_STATE.md` should stay narrowly conversation-focused, not a
   restatement of `PROJECT_CONTEXT.md`.
 - Keep `PROJECT_CONTEXT.md` and `CHAT_STATE.md` updated side-by-side with
   each improvement/build going forward, not just at session handoff.
+- Visual direction: dark "data-flow" redesign (see PROJECT_CONTEXT.md).
+- Priority: audit/fix before redesign; deployment deprioritized for now.
