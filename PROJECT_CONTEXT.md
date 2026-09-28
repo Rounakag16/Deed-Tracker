@@ -524,9 +524,9 @@ client will need a login flow added ahead of `WorkspaceList.jsx`.
   cyclic graph (returns gracefully instead of crashing); normal
   converging/diverging graphs were also re-verified to produce the same
   root-ancestor results as before the change.
-- **[FIXED] Canvas crashed with "Maximum update depth exceeded" on load,
-  reintroduced by diff `0011`, fixed by diff `0013`.** `0011` put
-  `recomputeCardHeights` (which sets `cardHeights`) in the same
+- **[FIXED, diff `0013`, INCOMPLETE - see below] Canvas crashed with
+  "Maximum update depth exceeded" on load, reintroduced by diff `0011`.**
+  `0011` put `recomputeCardHeights` (which sets `cardHeights`) in the same
   `useLayoutEffect` as `recomputeAnchors`, keyed on `autoPositions` -  but
   `autoPositions` is itself derived from `cardHeights`, so every
   `cardHeights` update re-ran the effect that could update `cardHeights`
@@ -543,6 +543,33 @@ client will need a login flow added ahead of `WorkspaceList.jsx`.
   (unchanged) independently catches a genuine size change to an existing
   card via the browser's native resize signal, with no React
   dependency-cycle risk either way.
+  **This fix was never live-tested until diff `0015`'s session - and the
+  same crash, at the same two lines, recurred.** The structural fix
+  above was correct and necessary but not sufficient: `heightsEqual`/
+  `anchorsEqual` compare floating-point `getBoundingClientRect()` values
+  with exact `!==`, and measuring an element inside a CSS
+  `transform: scale(zoom)` container (which `contentRef` is) can return
+  slightly different floats across otherwise-identical measurements -
+  subpixel rounding in the transform matrix, more pronounced under
+  non-100% OS display scaling (plausible here; the user's `node_modules`
+  is a Windows install, and Windows commonly runs at 125%/150% display
+  scaling). A "different" measurement that isn't really different still
+  passes the equality guard as a real change, triggers `setState`, which
+  the `ResizeObserver` picks back up, and the loop is back. **Fixed in
+  diff `0016`** by rounding every measured coordinate/height to the
+  nearest half-pixel before storing/comparing, so subpixel noise can't
+  register as a change. While in that code, also fixed a real (separate,
+  non-crash-causing) bug found in the process: `recomputeAnchors` never
+  divided its post-transform measurements back out by `zoom`, so wires
+  would drift out of position at any zoom level other than 100% - the
+  same divide-by-zoom fix was applied to `recomputeCardHeights` too, for
+  the same reason (both feed the unscaled content-coordinate layout math
+  elsewhere in the file). Verified with a standalone script confirming
+  the rounding collapses realistic subpixel-jitter pairs to equal values,
+  and that dividing a scaled measurement back out by zoom recovers the
+  true value. **Not yet re-confirmed live** - this is the second time
+  this exact crash has been "fixed" without a live retest; the honest
+  status is "should be fixed, unverified" until the user reports back.
 - **[SUPERSEDED] Expanded (mid-edit) cards could visually overlap the card
   below them** in the same auto-layout row - this was diff `0011`'s fix
   (measuring real card height per row and growing spacing to fit). Diff
@@ -571,12 +598,13 @@ client will need a login flow added ahead of `WorkspaceList.jsx`.
   actual position (including live drag) and equality-guarding the anchor
   state update. Found during the project's first live test; fix has not
   yet been re-confirmed live as of this writing.
-- **The app has had exactly one live end-to-end test so far**, which
-  connected to MongoDB successfully but hit the canvas crash above before
-  the rest of the feature set (relationships, save/reload, search, export,
-  etc.) could be exercised. Treat everything past "create a workspace, add
-  a deed" as still "should work" rather than "confirmed working" until a
-  full pass completes.
+- **The app has had two live end-to-end test attempts so far.** The first
+  connected to MongoDB successfully but hit a canvas crash (the boundary/
+  content-box one above) before the rest of the feature set could be
+  exercised. The second (diff `0015`'s session) hit the render-loop crash
+  described above. Treat everything past "create a workspace, add a deed"
+  as still "should work" rather than "confirmed working" until a full
+  pass completes without hitting either crash.
 
 ## Development Conventions
 

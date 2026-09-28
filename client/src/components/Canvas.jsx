@@ -222,6 +222,24 @@ export default function Canvas({ workspace, onView }) {
     if (!contentRef.current) return;
     const contentRect = contentRef.current.getBoundingClientRect();
     const next = new Map();
+    // getBoundingClientRect() is measured post-transform (after contentRef's
+    // `scale(zoom)`), but the SVG the anchors feed into lives inside that
+    // same scaled container and gets scaled again when it renders - so
+    // divide the measured offsets back out by zoom to land in the
+    // unscaled coordinate space the SVG actually expects. Without this,
+    // wires drift out of position at any zoom other than 100%.
+    //
+    // Also round to the nearest half-pixel. getBoundingClientRect() on an
+    // element inside a CSS transform can return slightly different
+    // floating-point values across otherwise-identical measurements
+    // (subpixel rounding in the transform matrix, more pronounced under
+    // non-100% OS display scaling). anchorsEqual below does an exact `!==`
+    // compare, so two measurements of a position that hasn't actually
+    // moved can still register as "different" - which defeats the
+    // equality guard entirely and reintroduces the exact
+    // "Maximum update depth exceeded" loop that guard exists to prevent,
+    // via the ResizeObserver below re-firing on the resulting re-render.
+    const round = (n) => Math.round(n * 2) / 2;
     allKeys.forEach((key) => {
       const topEl = topDotRefs.current.get(key);
       const bottomEl = bottomDotRefs.current.get(key);
@@ -229,8 +247,14 @@ export default function Canvas({ workspace, onView }) {
       const tr = topEl.getBoundingClientRect();
       const br = bottomEl.getBoundingClientRect();
       next.set(key, {
-        top: { x: tr.left + tr.width / 2 - contentRect.left, y: tr.top + tr.height / 2 - contentRect.top },
-        bottom: { x: br.left + br.width / 2 - contentRect.left, y: br.top + br.height / 2 - contentRect.top },
+        top: {
+          x: round((tr.left + tr.width / 2 - contentRect.left) / zoom),
+          y: round((tr.top + tr.height / 2 - contentRect.top) / zoom),
+        },
+        bottom: {
+          x: round((br.left + br.width / 2 - contentRect.left) / zoom),
+          y: round((br.top + br.height / 2 - contentRect.top) / zoom),
+        },
       });
     });
     // Guard against a render/measure feedback loop: only actually update
@@ -238,21 +262,25 @@ export default function Canvas({ workspace, onView }) {
     // this, any effect/observer that fires on every render (directly or
     // indirectly) can cascade into React's "Maximum update depth exceeded".
     setAnchors((prev) => (anchorsEqual(prev, next) ? prev : next));
-  }, [allKeys]);
+  }, [allKeys, zoom]);
 
   // Measures each card wrapper's real rendered height so row spacing can
   // grow to fit an expanded card (see the autoPositions/rowLayoutHeight
   // memo above). Same equality-guard pattern as recomputeAnchors, for the
   // same reason: an unguarded setState inside a ResizeObserver callback
   // that itself feeds back into layout can cascade into a render loop.
+  // Same zoom-descale + subpixel-rounding fix as recomputeAnchors above,
+  // and for the same reason: this height is compared/consumed in the
+  // unscaled content coordinate space, and an exact-equality compare on
+  // a raw post-transform measurement is what let the loop through.
   const recomputeCardHeights = useCallback(() => {
     const next = new Map();
     wrapperRefs.current.forEach((el, key) => {
       if (!el) return;
-      next.set(key, el.getBoundingClientRect().height);
+      next.set(key, Math.round((el.getBoundingClientRect().height / zoom) * 2) / 2);
     });
     setCardHeights((prev) => (heightsEqual(prev, next) ? prev : next));
-  }, []);
+  }, [zoom]);
 
   // Two separate effects on purpose, not one: recomputeAnchors reacts to
   // autoPositions changing (so wires follow rows that grew/shrank), but
