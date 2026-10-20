@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { customConfirm } from "../utils/confirm";
 
 const PAGE_SIZE = 20;
 
@@ -43,7 +44,7 @@ export default function WorkspaceList({ onOpen }) {
   };
 
   const handleDelete = async (id) => {
-    if (!confirm("Delete this workspace and every deed/relationship in it?")) return;
+    if (!(await customConfirm("Delete this workspace and every deed/relationship in it?"))) return;
     await api.deleteWorkspace(id);
     // If that was the last workspace on this page (and not page 1), step back
     // a page instead of showing an empty page.
@@ -78,22 +79,31 @@ export default function WorkspaceList({ onOpen }) {
           placeholder="New workspace name (e.g. '100-acre Sundarban tract')"
           className="flex-1 border border-border-strong bg-surface text-ink placeholder:text-ink-faint rounded px-3 py-2 focus:outline-none focus:border-brass"
         />
-        <button className="bg-brass text-canvas font-medium px-4 py-2 rounded hover:bg-brass-soft">
+        <button className="bg-brass text-canvas font-medium px-5 py-2.5 rounded-lg hover:bg-brass-soft transition-colors active:scale-95 shadow-sm">
           Create
         </button>
       </form>
 
-      {error && <p className="text-brick mb-4">{error}</p>}
+      {error && (
+        <div className="flex items-center gap-2 bg-brick/10 border border-brick/30 text-brick px-4 py-3 rounded-lg mb-6 text-sm">
+          <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span>{error}</span>
+        </div>
+      )}
+      
       {loading ? (
         <p className="text-ink-muted">Loading…</p>
       ) : workspaces.length === 0 ? (
         <p className="text-ink-faint">No workspaces yet — create one above.</p>
       ) : (
-        <ul className="space-y-2">
-          {workspaces.map((w) => (
+        <ul className="space-y-3">
+          {workspaces.map((w, i) => (
             <li
               key={w._id}
-              className="flex items-center justify-between bg-surface border border-border rounded px-4 py-3"
+              className="flex items-center justify-between bg-surface border border-border rounded-xl px-5 py-4 shadow-sm hover:shadow-md transition-all duration-300 hover:-translate-y-0.5 animate-fade-in-up"
+              style={{ animationDelay: `${Math.min(i * 50, 500)}ms` }}
             >
               {renamingId === w._id ? (
                 <form
@@ -107,12 +117,12 @@ export default function WorkspaceList({ onOpen }) {
                     autoFocus
                     value={renameValue}
                     onChange={(e) => setRenameValue(e.target.value)}
-                    className="flex-1 border border-border-strong bg-canvas text-ink rounded px-2 py-1 focus:outline-none focus:border-brass"
+                    className="flex-1 border border-border-strong bg-canvas text-ink rounded-lg px-3 py-1.5 focus:outline-none focus:border-brass transition-colors"
                   />
-                  <button className="text-sm text-verdigris hover:underline">Save</button>
+                  <button className="text-sm font-medium bg-verdigris/10 text-verdigris hover:bg-verdigris/20 px-3 py-1.5 rounded-md transition-colors">Save</button>
                   <button
                     type="button"
-                    className="text-sm text-ink-muted hover:underline"
+                    className="text-sm px-3 py-1.5 text-ink-muted hover:bg-surface-raised rounded-md transition-colors"
                     onClick={() => setRenamingId(null)}
                   >
                     Cancel
@@ -121,22 +131,22 @@ export default function WorkspaceList({ onOpen }) {
               ) : (
                 <button
                   onClick={() => onOpen(w)}
-                  className="text-left font-medium font-serif hover:underline"
+                  className="text-left font-medium font-serif text-lg hover:text-verdigris transition-colors"
                 >
                   {w.name}
                 </button>
               )}
               {renamingId !== w._id && (
-                <div className="flex gap-3">
+                <div className="flex gap-2">
                   <button
                     onClick={() => startRename(w)}
-                    className="text-ink-muted text-sm hover:underline"
+                    className="text-ink-muted px-3 py-1.5 text-sm hover:bg-surface-raised rounded-md transition-colors"
                   >
                     Rename
                   </button>
                   <button
                     onClick={() => handleDelete(w._id)}
-                    className="text-brick text-sm hover:underline"
+                    className="text-brick px-3 py-1.5 text-sm hover:bg-brick/10 rounded-md transition-colors"
                   >
                     Delete
                   </button>

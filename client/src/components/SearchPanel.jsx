@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { api } from "../api";
+import { deedLabel } from "../utils/deedLabel";
+import { printSearchResults } from "../utils/print";
 
 const TOPICS = [
   { value: "all", label: "All fields" },
@@ -16,11 +18,7 @@ const TOPICS = [
   { value: "plotNoLR", label: "Plot No. (LR)" },
 ];
 
-function deedLabel(deed) {
-  const num = deed.deedInfo?.deedNumber || "(no deed no.)";
-  const buyer = deed.purchasers?.[0]?.name || "";
-  return buyer ? `${num} - ${buyer}` : num;
-}
+// deedLabel is now imported from ../utils/deedLabel
 
 const PAGE_SIZE = 25;
 
@@ -32,6 +30,15 @@ export default function SearchPanel({ workspace, onlyThisWorkspace = true, onSel
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
+  const debounceRef = useRef(null);
+
+  // Debounced search-as-you-type
+  useEffect(() => {
+    if (!q.trim()) { setResults(null); return; }
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => runSearch(null, 1), 300);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [q, topic, scopeWorkspace]);
 
   const runSearch = async (e, targetPage = 1) => {
     if (e) e.preventDefault();
@@ -82,7 +89,20 @@ export default function SearchPanel({ workspace, onlyThisWorkspace = true, onSel
           />
           This workspace only
         </label>
-        <button className="bg-brass text-canvas font-medium px-4 py-2 rounded">Search</button>
+        <button type="submit" className="bg-brass text-canvas font-medium px-4 py-2 rounded">Search</button>
+        {results && results.length > 0 && (
+          <button
+            type="button"
+            onClick={() => printSearchResults(results, q, scopeWorkspace ? workspace?.name : null)}
+            className="border border-border text-ink-muted px-3 py-2 rounded text-sm hover:text-ink hover:bg-surface-raised transition-colors"
+            title="Print search results"
+          >
+            <svg className="w-4 h-4 inline-block mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+            </svg>
+            Print
+          </button>
+        )}
       </form>
 
       {loading && <p className="text-ink-muted">Searching…</p>}

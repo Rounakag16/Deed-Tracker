@@ -4,6 +4,9 @@ import DeedCard from "./DeedCard";
 import DeedSidebar from "./DeedSidebar";
 import { blankDeed } from "./DeedForm";
 import { computeLayers, computePositions } from "../layout";
+import { customConfirm } from "../utils/confirm";
+import { deedLabel } from "../utils/deedLabel";
+import { printDeed, printWorkspace } from "../utils/print";
 
 let tempIdCounter = 0;
 const nextTempId = () => `draft_${++tempIdCounter}`;
@@ -17,11 +20,6 @@ const WIRE_PENDING = "#c98a3b"; // brass
 const WIRE_LIVE_DRAG = "#4f9a8c"; // verdigris
 const WIRE_LABEL = "#8d94a3"; // ink-muted
 
-function deedLabel(deed) {
-  const num = deed.deedInfo?.deedNumber || "(no deed no.)";
-  const buyer = deed.purchasers?.[0]?.name || "";
-  return buyer ? `${num} - ${buyer}` : num;
-}
 
 function heightsEqual(a, b) {
   if (a === b) return true;
@@ -72,12 +70,16 @@ export default function Canvas({ workspace, onView }) {
   const [isPanning, setIsPanning] = useState(false);
   const [selectedKey, setSelectedKey] = useState(null); // key of the card shown in the sidebar
   const [sidebarDirty, setSidebarDirty] = useState(false); // mirrors DeedSidebar's own dirty state
+  const [selectedEdge, setSelectedEdge] = useState(null); // edge being inspected/edited via click
+  const [quickFindOpen, setQuickFindOpen] = useState(false);
+  const [quickFindQuery, setQuickFindQuery] = useState("");
 
   const draggingSourceRef = useRef(null);
   const cardDragRef = useRef(null);
   const panRef = useRef(null);
   const contentRef = useRef(null);
   const scrollRef = useRef(null);
+  const targetScrollRef = useRef(null);
   const wrapperRefs = useRef(new Map());
   const topDotRefs = useRef(new Map());
   const bottomDotRefs = useRef(new Map());
@@ -93,6 +95,25 @@ export default function Canvas({ workspace, onView }) {
   const keyFor = (deed) => (deed._id ? deed._id : deed._tempId);
   const allCards = useMemo(() => [...savedDeeds, ...draftDeeds], [savedDeeds, draftDeeds]);
   const allKeys = useMemo(() => allCards.map(keyFor), [allCards]);
+
+  // Client-side quick-find: filter cards matching the query without an API call
+  const quickFindMatches = useMemo(() => {
+    if (!quickFindOpen || !quickFindQuery.trim()) return null;
+    const q = quickFindQuery.toLowerCase();
+    return new Set(
+      allCards
+        .filter((deed) => {
+          const num = deed.deedInfo?.deedNumber?.toLowerCase() || "";
+          const buyers = (deed.purchasers || []).map((p) => p.name?.toLowerCase() || "").join(" ");
+          const sellers = (deed.sellers || []).map((s) => s.name?.toLowerCase() || "").join(" ");
+          const moujas = (deed.landParcels || []).map((lp) => lp.mouja?.toLowerCase() || "").join(" ");
+          const title = deed.title?.toLowerCase() || "";
+          return num.includes(q) || buyers.includes(q) || sellers.includes(q) || moujas.includes(q) || title.includes(q);
+        })
+        .map(keyFor)
+    );
+  }, [quickFindOpen, quickFindQuery, allCards]);
+
   const labelForKey = (key) => {
     const d = allCards.find((c) => keyFor(c) === key);
     return d ? deedLabel(d) : key;
@@ -105,9 +126,9 @@ export default function Canvas({ workspace, onView }) {
   // Switching the sidebar to a different (or no) card would silently throw
   // away any unsaved edit sitting in it - confirm first, same as every
   // other state-losing action in this file (Delete, Reset Layout).
-  const trySelect = (key) => {
+  const trySelect = async (key) => {
     if (sidebarDirty && selectedKey && selectedKey !== key) {
-      if (!confirm("Discard the unsaved changes on the currently selected deed?")) return;
+      if (!(await customConfirm("Discard the unsaved changes on the currently selected deed?"))) return;
     }
     setSidebarDirty(false);
     setSelectedKey(key);
@@ -142,6 +163,19 @@ export default function Canvas({ workspace, onView }) {
     ],
     [savedRelationships, pendingEdges]
   );
+
+  // Connection counts for each card (parent/child edge counts)
+  const connectionCounts = useMemo(() => {
+    const counts = new Map();
+    allKeys.forEach((key) => counts.set(key, { parents: 0, children: 0 }));
+    graphEdges.forEach((e) => {
+      const tc = counts.get(e.targetKey);
+      const sc = counts.get(e.sourceKey);
+      if (tc) tc.parents++;
+      if (sc) sc.children++;
+    });
+    return counts;
+  }, [allKeys, graphEdges]);
 
   const layerById = useMemo(() => computeLayers(allKeys, graphEdges), [allKeys, graphEdges]);
 
@@ -332,7 +366,9 @@ export default function Canvas({ workspace, onView }) {
     const handleMove = (e) => {
       if (!contentRef.current) return;
       const rect = contentRef.current.getBoundingClientRect();
-      setDragPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+      // Divide by zoom: rect is post-transform but the SVG lives inside the
+      // scaled container and expects unscaled coordinates.
+      setDragPos({ x: (e.clientX - rect.left) / zoom, y: (e.clientY - rect.top) / zoom });
     };
     const handleUp = (e) => {
       let targetKey = null;
@@ -355,7 +391,18 @@ export default function Canvas({ workspace, onView }) {
       setIsDragging(false);
       setDragPos(null);
       if (targetKey && sourceKey && targetKey !== sourceKey) {
-        setEdgeDraft({ sourceKey, targetKey, areaTransferred: "", note: "" });
+        // Don't allow duplicate links between the same two deeds (in either direction)
+        const alreadyLinked = graphEdges.some(
+          (edge) =>
+            (edge.sourceKey === sourceKey && edge.targetKey === targetKey) ||
+            (edge.sourceKey === targetKey && edge.targetKey === sourceKey)
+        );
+        if (alreadyLinked) {
+          setError("These two deeds are already linked.");
+          setTimeout(() => setError(""), 3000);
+        } else {
+          setEdgeDraft({ sourceKey, targetKey, areaTransferred: "", note: "" });
+        }
       }
     };
     window.addEventListener("mousemove", handleMove);
@@ -474,26 +521,160 @@ export default function Canvas({ workspace, onView }) {
     };
   }, [isPanning]);
 
+  // Wheel to zoom (using passive: false so we can prevent browser scroll)
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const handleWheel = (e) => {
+      // Figma/Google Maps style:
+      // Scroll (no modifier) = Pan (native behavior, so we don't preventDefault)
+      // Ctrl+Scroll or Pinch = Zoom
+      if (!e.ctrlKey && !e.metaKey) {
+        return; 
+      }
+      
+      e.preventDefault();
+      
+      setZoom((oldZoom) => {
+        // e.deltaY is usually 100 for a mouse wheel tick. 
+        // A trackpad pinch or slow scroll might be 2 or 5.
+        // We use an exponential scale so it feels smooth.
+        const zoomFactor = Math.exp(-e.deltaY * 0.002);
+        const newZoomRaw = oldZoom * zoomFactor;
+        const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newZoomRaw));
+        
+        if (newZoom === oldZoom) return oldZoom;
+
+        // Get mouse position relative to the scroll container
+        const rect = el.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
+
+        // Calculate where the mouse is in the unscaled content space
+        const contentX = (el.scrollLeft + mouseX) / oldZoom;
+        const contentY = (el.scrollTop + mouseY) / oldZoom;
+
+        // Calculate where the scrollbar SHOULD be to keep the mouse stationary
+        const newScrollLeft = contentX * newZoom - mouseX;
+        const newScrollTop = contentY * newZoom - mouseY;
+
+        // Store the target scroll position so useLayoutEffect can apply it AFTER the resize
+        targetScrollRef.current = {
+          x: newScrollLeft,
+          y: newScrollTop,
+        };
+
+        return newZoom;
+      });
+    };
+    
+    // use passive: false so e.preventDefault() works
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    return () => el.removeEventListener("wheel", handleWheel);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (targetScrollRef.current && scrollRef.current) {
+      scrollRef.current.scrollLeft = targetScrollRef.current.x;
+      scrollRef.current.scrollTop = targetScrollRef.current.y;
+      targetScrollRef.current = null;
+    }
+  }, [zoom]);
+
   const zoomIn = () => setZoom((z) => Math.min(MAX_ZOOM, +(z + ZOOM_STEP).toFixed(2)));
   const zoomOut = () => setZoom((z) => Math.max(MIN_ZOOM, +(z - ZOOM_STEP).toFixed(2)));
   const zoomReset = () => setZoom(1);
 
+  const centerView = () => {
+    if (!scrollRef.current) return;
+    const container = scrollRef.current;
+    
+    // Total scrollable area based on content size and current zoom
+    const contentWidth = Math.max(width, 900) * zoom;
+    const contentHeight = Math.max(height, 400) * zoom;
+    
+    // Viewport dimensions
+    const clientWidth = container.clientWidth;
+    const clientHeight = container.clientHeight;
+    
+    // Calculate center offset
+    const targetX = (contentWidth - clientWidth) / 2;
+    const targetY = (contentHeight - clientHeight) / 2;
+    
+    container.scrollTo({
+      left: Math.max(0, targetX),
+      top: Math.max(0, targetY),
+      behavior: "smooth"
+    });
+  };
+
+  const zoomToFit = () => {
+    if (!scrollRef.current || allCards.length === 0) return;
+    const container = scrollRef.current;
+    const clientW = container.clientWidth;
+    const clientH = container.clientHeight;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    allCards.forEach((deed) => {
+      const key = keyFor(deed);
+      const pos = resolvedPos(key, deed);
+      if (!pos) return;
+      minX = Math.min(minX, pos.x);
+      minY = Math.min(minY, pos.y);
+      maxX = Math.max(maxX, pos.x + NODE_W);
+      maxY = Math.max(maxY, pos.y + NODE_H_ESTIMATE);
+    });
+    if (minX === Infinity) return;
+    const graphW = maxX - minX + PADDING * 2;
+    const graphH = maxY - minY + PADDING * 2;
+    const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.min(clientW / graphW, clientH / graphH) * 0.9));
+    setZoom(newZoom);
+    requestAnimationFrame(() => {
+      container.scrollTo({
+        left: ((minX + maxX) / 2) * newZoom - clientW / 2,
+        top: ((minY + maxY) / 2) * newZoom - clientH / 2,
+        behavior: "smooth",
+      });
+    });
+  };
+
   const resetLayout = async () => {
-    if (!confirm("Snap every deed back to the auto-arranged layout?")) return;
+    if (!(await customConfirm("Snap every deed back to the auto-arranged layout?"))) return;
     setDraftDeeds((prev) => prev.map((d) => ({ ...d, position: null })));
     const placed = savedDeeds.filter((d) => d.position);
     await Promise.all(placed.map((d) => api.updateDeed(workspace._id, d._id, { position: null })));
     load();
   };
 
-  const addDraftDeed = () => {
+  const addDraftDeed = async () => {
     if (sidebarDirty && selectedKey) {
-      if (!confirm("Discard the unsaved changes on the currently selected deed?")) return;
+      if (!(await customConfirm("Discard the unsaved changes on the currently selected deed?"))) return;
     }
     const tempId = nextTempId();
     setDraftDeeds((prev) => [...prev, { _tempId: tempId, ...blankDeed() }]);
     setSidebarDirty(false);
     setSelectedKey(tempId); // open the sidebar straight away, same as the old inline-expand-on-add did
+  };
+
+  const deriveChildDeed = async (parentDeed) => {
+    if (sidebarDirty && selectedKey) {
+      if (!(await customConfirm("Discard the unsaved changes on the currently selected deed?"))) return;
+    }
+    const tempId = nextTempId();
+    const parentKey = keyFor(parentDeed);
+    
+    // Copy the parent's buyers as the new sellers, and copy all land parcels exactly
+    const childDeed = {
+      ...blankDeed(),
+      _tempId: tempId,
+      sellers: JSON.parse(JSON.stringify(parentDeed.purchasers || [])),
+      landParcels: JSON.parse(JSON.stringify(parentDeed.landParcels || [])),
+    };
+    
+    setDraftDeeds((prev) => [...prev, childDeed]);
+    setPendingEdges((prev) => [...prev, { sourceKey: parentKey, targetKey: tempId, areaTransferred: "", note: "" }]);
+    
+    setSidebarDirty(false);
+    setSelectedKey(tempId);
   };
 
   const updateDraft = (tempId, next) => {
@@ -512,7 +693,7 @@ export default function Canvas({ workspace, onView }) {
   // Returns whether the deed was actually deleted, so callers (the
   // sidebar) know whether to close themselves - confirm() can be canceled.
   const deleteSavedDeed = async (id) => {
-    if (!confirm("Delete this deed and every relationship touching it?")) return false;
+    if (!(await customConfirm("Delete this deed and every relationship touching it?"))) return false;
     await api.deleteDeed(workspace._id, id);
     load();
     if (selectedKey === id) {
@@ -523,16 +704,60 @@ export default function Canvas({ workspace, onView }) {
   };
 
   const confirmEdgeDraft = () => {
+    // Guard: don't add a duplicate edge even if one was somehow queued
+    const dup = graphEdges.some(
+      (edge) =>
+        (edge.sourceKey === edgeDraft.sourceKey && edge.targetKey === edgeDraft.targetKey) ||
+        (edge.sourceKey === edgeDraft.targetKey && edge.targetKey === edgeDraft.sourceKey)
+    );
+    if (dup) {
+      setError("These two deeds are already linked.");
+      setTimeout(() => setError(""), 3000);
+      setEdgeDraft(null);
+      return;
+    }
     setPendingEdges((prev) => [...prev, edgeDraft]);
     setEdgeDraft(null);
   };
 
-  const removePendingEdge = (i) => setPendingEdges((prev) => prev.filter((_, idx) => idx !== i));
+  const removePendingEdge = (i) => {
+    setPendingEdges((prev) => prev.filter((_, idx) => idx !== i));
+    setSelectedEdge(null);
+  };
 
   const deleteSavedRelationship = async (id) => {
-    if (!confirm("Remove this link?")) return;
+    if (!(await customConfirm("Remove this link?"))) return;
     await api.deleteRelationship(workspace._id, id);
+    setSelectedEdge(null);
     load();
+  };
+
+  const updateSavedRelationship = async (id, data) => {
+    await api.updateRelationship(workspace._id, id, data);
+    setSelectedEdge(null);
+    load();
+  };
+
+  const updatePendingEdge = (idx, data) => {
+    setPendingEdges((prev) =>
+      prev.map((e, i) => (i === idx ? { ...e, ...data } : e))
+    );
+    setSelectedEdge(null);
+  };
+
+  const handleEdgeClick = (edge, event) => {
+    event.stopPropagation();
+    // Position the popover near the click
+    const contentRect = contentRef.current?.getBoundingClientRect();
+    const x = contentRect ? (event.clientX - contentRect.left) / zoom : event.clientX;
+    const y = contentRect ? (event.clientY - contentRect.top) / zoom : event.clientY;
+    setSelectedEdge({
+      ...edge,
+      popX: x,
+      popY: y,
+      editArea: edge.areaTransferred || "",
+      editNote: edge.note || "",
+    });
   };
 
   const handleSaveAll = async () => {
@@ -556,6 +781,12 @@ export default function Canvas({ workspace, onView }) {
         }));
         await api.createRelationships(workspace._id, resolved);
       }
+      // If the selected card was a draft, its temp ID no longer exists after
+      // save — clear it so the sidebar doesn't go blank looking for a stale key.
+      if (selectedKey && selectedKey.startsWith("draft_")) {
+        setSelectedKey(null);
+        setSidebarDirty(false);
+      }
       setDraftDeeds([]);
       setPendingEdges([]);
       load();
@@ -567,6 +798,29 @@ export default function Canvas({ workspace, onView }) {
   };
 
   const hasUnsaved = draftDeeds.length > 0 || pendingEdges.length > 0;
+
+  // Global keyboard shortcuts for the canvas view
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Don't intercept when the user is typing in a form field
+      if (e.target.closest("input, textarea, select")) return;
+      if ((e.ctrlKey || e.metaKey) && e.key === "f") {
+        e.preventDefault();
+        setQuickFindOpen(true);
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        if (hasUnsaved) handleSaveAll();
+      }
+      if (e.key === "Escape") {
+        if (quickFindOpen) { setQuickFindOpen(false); setQuickFindQuery(""); }
+        else if (selectedEdge) setSelectedEdge(null);
+        else if (selectedKey) trySelect(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [quickFindOpen, selectedEdge, selectedKey, hasUnsaved]);
 
   return (
     <div className="h-full flex flex-col bg-canvas text-ink">
@@ -603,15 +857,42 @@ export default function Canvas({ workspace, onView }) {
         </button>
         <button
           onClick={onView}
-          className="border border-border-strong text-ink px-3 py-1.5 rounded text-sm hover:bg-surface-raised"
+          className="border border-border-strong text-ink px-3 py-1.5 rounded text-sm hover:bg-surface-raised transition-colors"
         >
           View
         </button>
         <button
+          onClick={centerView}
+          className="border border-border text-ink-muted px-3 py-1.5 rounded text-sm hover:text-ink hover:bg-surface-raised transition-colors"
+        >
+          Center View
+        </button>
+        <button
           onClick={resetLayout}
-          className="border border-border text-ink-muted px-3 py-1.5 rounded text-sm hover:text-ink hover:bg-surface-raised"
+          className="border border-border text-ink-muted px-3 py-1.5 rounded text-sm hover:text-ink hover:bg-surface-raised transition-colors"
         >
           Reset Layout
+        </button>
+        <button
+          onClick={zoomToFit}
+          className="border border-border text-ink-muted px-3 py-1.5 rounded text-sm hover:text-ink hover:bg-surface-raised transition-colors"
+          title="Zoom to fit all deeds in view"
+        >
+          Fit All
+        </button>
+        <button
+          onClick={() => { setQuickFindOpen((v) => !v); if (!quickFindOpen) setQuickFindQuery(""); }}
+          className={`border px-3 py-1.5 rounded text-sm transition-colors ${quickFindOpen ? "border-verdigris text-verdigris bg-verdigris/10" : "border-border text-ink-muted hover:text-ink hover:bg-surface-raised"}`}
+          title="Find on canvas (Ctrl+F)"
+        >
+          Find
+        </button>
+        <button
+          onClick={() => printWorkspace(savedDeeds, savedRelationships, workspace.name)}
+          className="border border-border text-ink-muted px-3 py-1.5 rounded text-sm hover:text-ink hover:bg-surface-raised transition-colors"
+          title="Print workspace deed list"
+        >
+          Print
         </button>
         <a
           href={api.exportWorkspaceUrl(workspace._id)}
@@ -631,8 +912,15 @@ export default function Canvas({ workspace, onView }) {
       </div>
 
       {(error || duplicateDeedNumbers.length > 0 || edgeDraft) && (
-        <div className="px-4 py-3 border-b border-border bg-surface shrink-0 space-y-3">
-          {error && <p className="text-brick text-sm">{error}</p>}
+        <div className="px-4 py-3 border-b border-border bg-surface shrink-0 space-y-3 relative z-10 shadow-sm">
+          {error && (
+            <div className="flex items-center gap-2 bg-brick/10 border border-brick/30 text-brick px-3 py-2 rounded-lg text-sm">
+              <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <span>{error}</span>
+            </div>
+          )}
 
           {duplicateDeedNumbers.length > 0 && (
             <div className="border border-brass/40 bg-brass/10 text-brass rounded p-3 text-sm">
@@ -649,30 +937,32 @@ export default function Canvas({ workspace, onView }) {
           )}
 
           {edgeDraft && (
-            <div className="border border-brass bg-surface-raised rounded p-3 text-sm">
-              <p className="mb-2 text-ink">
-                <strong>{labelForKey(edgeDraft.targetKey)}</strong> derives from{" "}
-                <strong>{labelForKey(edgeDraft.sourceKey)}</strong>
+            <div className="border border-verdigris/30 bg-surface-raised shadow-md rounded-xl p-4 text-sm relative animate-zoom-in">
+              <div className="absolute top-0 left-0 w-1 h-full bg-verdigris rounded-l-xl"></div>
+              <p className="mb-3 text-ink">
+                Creating link: <strong className="font-semibold">{labelForKey(edgeDraft.sourceKey)}</strong>
+                <span className="text-ink-muted mx-2">→</span>
+                <strong className="font-semibold">{labelForKey(edgeDraft.targetKey)}</strong>
               </p>
-              <div className="flex gap-2 mb-2">
+              <div className="flex gap-3 mb-4">
                 <input
-                  className="flex-1 border border-border-strong bg-canvas text-ink placeholder:text-ink-faint rounded px-2 py-1 focus:outline-none focus:border-brass"
+                  className="flex-1 border border-border-strong bg-canvas hover:bg-surface/50 text-ink placeholder:text-ink-faint rounded-md px-3 py-2 focus:outline-none focus:border-verdigris focus:ring-1 focus:ring-verdigris focus:bg-canvas transition-all duration-300 shadow-sm"
                   placeholder="Area/share transferred (optional)"
                   value={edgeDraft.areaTransferred}
                   onChange={(e) => setEdgeDraft({ ...edgeDraft, areaTransferred: e.target.value })}
                 />
                 <input
-                  className="flex-1 border border-border-strong bg-canvas text-ink placeholder:text-ink-faint rounded px-2 py-1 focus:outline-none focus:border-brass"
+                  className="flex-1 border border-border-strong bg-canvas hover:bg-surface/50 text-ink placeholder:text-ink-faint rounded-md px-3 py-2 focus:outline-none focus:border-verdigris focus:ring-1 focus:ring-verdigris focus:bg-canvas transition-all duration-300 shadow-sm"
                   placeholder="Note (optional)"
                   value={edgeDraft.note}
                   onChange={(e) => setEdgeDraft({ ...edgeDraft, note: e.target.value })}
                 />
               </div>
               <div className="flex gap-2">
-                <button onClick={confirmEdgeDraft} className="bg-brass text-canvas font-medium px-3 py-1 rounded">
+                <button onClick={confirmEdgeDraft} className="bg-verdigris hover:bg-verdigris/90 text-canvas font-medium px-4 py-2 rounded-md transition-all duration-300 active:scale-95 shadow-sm">
                   Add this link
                 </button>
-                <button onClick={() => setEdgeDraft(null)} className="px-3 py-1 text-ink-muted hover:text-ink">
+                <button onClick={() => setEdgeDraft(null)} className="px-4 py-2 text-ink-muted hover:text-ink border border-transparent hover:border-border rounded-md transition-all duration-300 active:scale-95">
                   Cancel
                 </button>
               </div>
@@ -681,16 +971,54 @@ export default function Canvas({ workspace, onView }) {
         </div>
       )}
 
-      <div className="flex-1 min-h-0 flex overflow-hidden">
+      <div className="flex-1 min-h-0 flex overflow-hidden relative">
         {allCards.length === 0 ? (
-          <div className="flex-1 flex items-center justify-center text-ink-faint text-sm">
-            No deeds yet. Click "Add Deed" to start.
+          <div className="flex-1 flex flex-col items-center justify-center bg-canvas">
+            <div className="bg-surface border border-border-strong rounded-2xl p-8 text-center max-w-sm shadow-xl animate-fade-in-up">
+              <div className="w-16 h-16 bg-surface-raised border border-border rounded-xl flex items-center justify-center mx-auto mb-4 animate-zoom-in">
+                <svg className="w-8 h-8 text-ink-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              </div>
+              <h3 className="text-lg font-serif font-semibold text-ink mb-2">No Deeds Yet</h3>
+              <p className="text-sm text-ink-muted mb-6 leading-relaxed">
+                Your workspace is currently empty. Start by adding a root deed to build your lineage graph.
+              </p>
+              <button
+                onClick={addDraftDeed}
+                className="bg-brass hover:bg-brass-soft text-canvas font-medium px-5 py-2.5 rounded-lg text-sm transition-all duration-300 active:scale-95 shadow-sm w-full"
+              >
+                + Add First Deed
+              </button>
+            </div>
           </div>
         ) : (
+          <>
+          {quickFindOpen && (
+            <div className="absolute top-2 left-1/2 -translate-x-1/2 z-30 animate-zoom-in" style={{ width: 360 }}>
+              <div className="bg-surface border border-border-strong rounded-xl shadow-xl flex items-center px-3 gap-2">
+                <svg className="w-4 h-4 text-ink-faint shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                <input
+                  autoFocus
+                  value={quickFindQuery}
+                  onChange={(e) => setQuickFindQuery(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Escape") { setQuickFindOpen(false); setQuickFindQuery(""); } }}
+                  placeholder="Find deed on canvas…"
+                  className="flex-1 bg-transparent text-ink placeholder:text-ink-faint py-2.5 text-sm focus:outline-none"
+                />
+                {quickFindMatches && (
+                  <span className="text-xs text-ink-faint shrink-0">{quickFindMatches.size} match{quickFindMatches.size !== 1 ? "es" : ""}</span>
+                )}
+                <button onClick={() => { setQuickFindOpen(false); setQuickFindQuery(""); }} className="text-ink-faint hover:text-ink text-xs p-1">✕</button>
+              </div>
+            </div>
+          )}
           <div
             ref={scrollRef}
             onMouseDown={startPan}
-            className="flex-1 overflow-auto bg-canvas"
+            className="flex-1 overflow-auto canvas-scroll bg-canvas"
             style={{
               cursor: isPanning ? "grabbing" : "grab",
               backgroundImage: "radial-gradient(#2b323c 1px, transparent 1px)",
@@ -740,7 +1068,11 @@ export default function Canvas({ workspace, onView }) {
                   const x2 = b.top.x,
                     y2 = b.top.y;
                   const midY = (y1 + y2) / 2;
-                  const wireColor = e.saved ? WIRE_SAVED : WIRE_PENDING;
+                  const isEdgeSelected = selectedEdge && (
+                    (e.saved && selectedEdge._id === e._id) ||
+                    (!e.saved && selectedEdge.pendingIndex === e.pendingIndex && !selectedEdge.saved)
+                  );
+                  const wireColor = isEdgeSelected ? WIRE_LIVE_DRAG : (e.saved ? WIRE_SAVED : WIRE_PENDING);
                   return (
                     <g key={e._id || `pending-${i}`}>
                       {/* Soft duplicate underneath for the glow - same path,
@@ -749,23 +1081,28 @@ export default function Canvas({ workspace, onView }) {
                         d={`M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`}
                         fill="none"
                         stroke={wireColor}
-                        strokeWidth="5"
-                        opacity="0.16"
+                        strokeWidth={isEdgeSelected ? "8" : "5"}
+                        opacity={isEdgeSelected ? "0.28" : "0.16"}
                         style={{ filter: "blur(2px)" }}
                       />
                       <path
                         d={`M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`}
                         fill="none"
                         stroke={wireColor}
-                        strokeWidth="1.6"
+                        strokeWidth={isEdgeSelected ? "2.2" : "1.6"}
                         strokeDasharray={e.saved ? undefined : "5,4"}
                         markerEnd={e.saved ? "url(#arrowhead-edit)" : "url(#arrowhead-edit-pending)"}
                         style={{ pointerEvents: "stroke", cursor: "pointer" }}
-                        onClick={() =>
-                          e.saved
-                            ? deleteSavedRelationship(e._id)
-                            : removePendingEdge(e.pendingIndex)
-                        }
+                        onClick={(ev) => handleEdgeClick(e, ev)}
+                      />
+                      {/* Invisible wider hit-target so thin wires are easier to click */}
+                      <path
+                        d={`M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`}
+                        fill="none"
+                        stroke="transparent"
+                        strokeWidth="14"
+                        style={{ pointerEvents: "stroke", cursor: "pointer" }}
+                        onClick={(ev) => handleEdgeClick(e, ev)}
                       />
                       {e.areaTransferred && (
                         <text
@@ -824,6 +1161,8 @@ export default function Canvas({ workspace, onView }) {
                       width: NODE_W,
                       cursor: isBeingDragged ? "grabbing" : "pointer",
                       zIndex: isBeingDragged ? 20 : isSelected ? 10 : 1,
+                      opacity: quickFindMatches && !quickFindMatches.has(key) ? 0.2 : 1,
+                      transition: "opacity 0.2s ease",
                     }}
                   >
                     <div
@@ -836,7 +1175,7 @@ export default function Canvas({ workspace, onView }) {
                       style={{ position: "absolute", top: -8, left: NODE_W / 2 - 8, zIndex: 5 }}
                     />
 
-                    <DeedCard deed={deed} isDraft={isDraft} isSelected={isSelected} />
+                    <DeedCard deed={deed} isDraft={isDraft} isSelected={isSelected} parentCount={connectionCounts.get(key)?.parents || 0} childCount={connectionCounts.get(key)?.children || 0} />
 
                     <div
                       ref={(el) => {
@@ -851,9 +1190,86 @@ export default function Canvas({ workspace, onView }) {
                   </div>
                 );
               })}
+
+              {/* Edge edit/delete popover — floating near the clicked wire */}
+              {selectedEdge && (
+                <div
+                  style={{
+                    position: "absolute",
+                    left: Math.min(selectedEdge.popX, (Math.max(width, 900)) - 320),
+                    top: selectedEdge.popY + 10,
+                    zIndex: 50,
+                    width: 300,
+                  }}
+                  onClick={(ev) => ev.stopPropagation()}
+                  onMouseDown={(ev) => ev.stopPropagation()}
+                >
+                  <div className="bg-surface border border-border-strong rounded-lg shadow-xl p-4 text-sm">
+                    <div className="flex items-center justify-between mb-3">
+                      <p className="font-medium text-ink text-xs uppercase tracking-wide">Edit Link</p>
+                      <button
+                        onClick={() => setSelectedEdge(null)}
+                        className="text-ink-faint hover:text-ink text-xs"
+                      >✕</button>
+                    </div>
+                    <p className="text-ink-muted text-xs mb-3 leading-relaxed">
+                      <span className="text-ink font-medium">{labelForKey(selectedEdge.sourceKey)}</span>
+                      {" → "}
+                      <span className="text-ink font-medium">{labelForKey(selectedEdge.targetKey)}</span>
+                    </p>
+                    <div className="space-y-2 mb-3">
+                      <input
+                        className="w-full border border-border-strong bg-canvas text-ink placeholder:text-ink-faint rounded px-2.5 py-1.5 text-sm focus:outline-none focus:border-brass"
+                        placeholder="Area/share transferred"
+                        value={selectedEdge.editArea}
+                        onChange={(ev) => setSelectedEdge({ ...selectedEdge, editArea: ev.target.value })}
+                      />
+                      <input
+                        className="w-full border border-border-strong bg-canvas text-ink placeholder:text-ink-faint rounded px-2.5 py-1.5 text-sm focus:outline-none focus:border-brass"
+                        placeholder="Note"
+                        value={selectedEdge.editNote}
+                        onChange={(ev) => setSelectedEdge({ ...selectedEdge, editNote: ev.target.value })}
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        className="bg-verdigris text-canvas font-medium text-xs px-3 py-1.5 rounded hover:opacity-90"
+                        onClick={() => {
+                          const data = { areaTransferred: selectedEdge.editArea, note: selectedEdge.editNote };
+                          if (selectedEdge.saved) {
+                            updateSavedRelationship(selectedEdge._id, data);
+                          } else {
+                            updatePendingEdge(selectedEdge.pendingIndex, data);
+                          }
+                        }}
+                      >
+                        Save
+                      </button>
+                      <button
+                        className="text-xs px-3 py-1.5 border border-border text-ink-muted hover:text-ink rounded"
+                        onClick={() => setSelectedEdge(null)}
+                      >
+                        Cancel
+                      </button>
+                      <div className="flex-1" />
+                      <button
+                        className="text-brick text-xs hover:underline"
+                        onClick={() =>
+                          selectedEdge.saved
+                            ? deleteSavedRelationship(selectedEdge._id)
+                            : removePendingEdge(selectedEdge.pendingIndex)
+                        }
+                      >
+                        Delete link
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
               </div>
             </div>
           </div>
+          </>
         )}
 
         {selectedDeed &&
@@ -878,6 +1294,8 @@ export default function Canvas({ workspace, onView }) {
                   if (isDraft) removeDraft(selectedDeed._tempId);
                   else await deleteSavedDeed(selectedDeed._id);
                 }}
+                onDerive={() => deriveChildDeed(selectedDeed)}
+                onPrint={() => printDeed(selectedDeed)}
                 onDirtyChange={setSidebarDirty}
                 onClose={() => trySelect(null)}
               />

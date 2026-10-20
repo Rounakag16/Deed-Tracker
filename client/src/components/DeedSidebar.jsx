@@ -10,7 +10,7 @@ import DeedForm from "./DeedForm";
 // Details - this buffering is load-bearing, don't simplify it away). For
 // a draft (unsaved) deed, edits fire onChange immediately - cheap, since
 // they're only held in memory until the batch "Save" on the canvas.
-export default function DeedSidebar({ deed, isDraft, onChange, onSave, onDelete, onClose, onDirtyChange }) {
+export default function DeedSidebar({ deed, isDraft, onChange, onSave, onDelete, onDerive, onPrint, onClose, onDirtyChange }) {
   const [localDeed, setLocalDeed] = useState(deed);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -54,8 +54,8 @@ export default function DeedSidebar({ deed, isDraft, onChange, onSave, onDelete,
   const buyer = displayDeed.purchasers?.[0]?.name;
 
   return (
-    <div className="w-96 shrink-0 border-l border-border bg-surface flex flex-col text-ink">
-      <div className="flex items-start justify-between p-4 border-b border-border shrink-0">
+    <div className="w-[450px] shrink-0 border-l border-border bg-surface flex flex-col text-ink shadow-2xl z-20 relative animate-slide-in-right">
+      <div className="flex items-start justify-between p-5 border-b border-border shrink-0 bg-surface-raised">
         <div className="min-w-0">
           <p className="font-semibold font-serif truncate">
             {summary} {isDraft && <span className="text-brass text-xs font-sans font-normal">(unsaved)</span>}
@@ -81,7 +81,7 @@ export default function DeedSidebar({ deed, isDraft, onChange, onSave, onDelete,
           <>
             <button
               type="button"
-              className="bg-verdigris text-canvas font-medium text-sm px-3 py-1.5 rounded disabled:opacity-60"
+              className="bg-verdigris hover:bg-verdigris/90 text-canvas font-medium text-sm px-4 py-2 rounded-lg disabled:opacity-60 transition-all active:scale-95 shadow-sm"
               onClick={handleSaveClick}
               disabled={saving}
             >
@@ -89,7 +89,7 @@ export default function DeedSidebar({ deed, isDraft, onChange, onSave, onDelete,
             </button>
             <button
               type="button"
-              className="text-sm px-3 py-1.5 border border-border text-ink-muted hover:text-ink rounded"
+              className="text-sm px-4 py-2 border border-border text-ink-muted hover:text-ink rounded-lg transition-colors active:scale-95"
               onClick={handleDiscardClick}
             >
               Discard
@@ -97,7 +97,27 @@ export default function DeedSidebar({ deed, isDraft, onChange, onSave, onDelete,
           </>
         )}
         <div className="flex-1" />
-        <button type="button" className="text-brick text-sm hover:underline" onClick={onDelete}>
+        <button 
+          type="button" 
+          className="text-verdigris border border-verdigris/30 hover:bg-verdigris/10 text-sm px-4 py-2 rounded-lg transition-colors active:scale-95" 
+          onClick={onDerive}
+          title="Create a new child deed pre-filled with this deed's parcels and linked to it"
+        >
+          Derive Child
+        </button>
+        {onPrint && (
+          <button
+            type="button"
+            className="text-ink-muted border border-border hover:bg-surface-raised text-sm px-3 py-2 rounded-lg transition-colors active:scale-95 ml-1"
+            onClick={onPrint}
+            title="Print this deed"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+            </svg>
+          </button>
+        )}
+        <button type="button" className="text-brick text-sm hover:underline ml-1 transition-colors active:scale-95 px-2" onClick={onDelete}>
           Delete
         </button>
       </div>

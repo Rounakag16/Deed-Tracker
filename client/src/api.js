@@ -47,6 +47,11 @@ export const api = {
     request(`/workspaces/${workspaceId}/relationships/${relationshipId}`, {
       method: "DELETE",
     }),
+  updateRelationship: (workspaceId, relationshipId, data) =>
+    request(`/workspaces/${workspaceId}/relationships/${relationshipId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
 
   // Returns { results, total, page, limit }
   search: (q, topic, workspaceId, page = 1, limit = 25) => {

@@ -5,3 +5,45 @@
 body {
   @apply bg-canvas text-ink font-sans;
 }
+
+/* Thin, dark-themed scrollbar globally — provides spatial orientation cues
+   without the heavy chrome of default browser scrollbars. */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(141, 148, 163, 0.2);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(141, 148, 163, 0.4);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(141, 148, 163, 0.2) transparent;
+}
+
+/* The canvas viewport uses drag-to-pan, so hide its scrollbar entirely. */
+.canvas-scroll::-webkit-scrollbar {
+  display: none;
+}
+.canvas-scroll {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Print utilities — the print.js module opens a dedicated window, but these
+   rules cover any in-page `window.print()` calls. */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}

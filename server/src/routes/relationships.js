@@ -94,6 +94,27 @@ router.post(
   })
 );
 
+// PUT /api/workspaces/:workspaceId/relationships/:relationshipId
+// Only areaTransferred and note are editable — source/target/workspace are
+// structural and shouldn't change after creation.
+router.put(
+  "/:relationshipId",
+  asyncHandler(async (req, res) => {
+    const { workspaceId, relationshipId } = req.params;
+    const { areaTransferred, note } = req.body;
+    const updates = {};
+    if (areaTransferred !== undefined) updates.areaTransferred = areaTransferred;
+    if (note !== undefined) updates.note = note;
+    const rel = await Relationship.findOneAndUpdate(
+      { _id: relationshipId, workspaceId },
+      { $set: updates },
+      { new: true, runValidators: true }
+    );
+    if (!rel) return res.status(404).json({ error: "Relationship not found" });
+    res.json(rel);
+  })
+);
+
 // DELETE /api/workspaces/:workspaceId/relationships/:relationshipId
 router.delete(
   "/:relationshipId",

@@ -1,12 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { computeLayers, computePositions } from "../layout";
-
-function deedLabel(deed) {
-  const num = deed.deedInfo?.deedNumber || "(no deed no.)";
-  const buyer = deed.purchasers?.[0]?.name || "";
-  return buyer ? `${num} - ${buyer}` : num;
-}
+import { deedLabel } from "../utils/deedLabel";
 
 const NODE_W = 190;
 const NODE_H = 60;
