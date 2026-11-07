@@ -8,7 +8,11 @@ const router = express.Router();
 // Map a search "topic" to the Mongo fields it should match against.
 const TOPIC_FIELDS = {
   purchaser: ["purchasers.name", "purchasers.fatherName"],
+  purchaserName: ["purchasers.name"],
+  purchaserFather: ["purchasers.fatherName"],
   seller: ["sellers.name", "sellers.fatherName"],
+  sellerName: ["sellers.name"],
+  sellerFather: ["sellers.fatherName"],
   deedNo: ["deedInfo.deedNumber"],
   volumeNo: ["deedInfo.volumeNumber"],
   pageNo: ["deedInfo.pageNumber"],
@@ -18,6 +22,8 @@ const TOPIC_FIELDS = {
   khatiyaNo: ["landParcels.khatiyas.number"],
   plotNoRS: ["landParcels.plots.rs"],
   plotNoLR: ["landParcels.plots.lr"],
+  area: ["landParcels.area", "landParcels.plots.area"],
+  title: ["title"],
 };
 
 const DEFAULT_LIMIT = 25;
@@ -48,7 +54,7 @@ function escapeRegex(str) {
 router.get(
   "/",
   asyncHandler(async (req, res) => {
-    const { q, topic = "all", workspaceId } = req.query;
+    const { q, topic = "all", workspaceId, exact } = req.query;
     if (!q || !q.trim()) {
       return res.status(400).json({ error: "Query param 'q' is required" });
     }
@@ -56,6 +62,7 @@ router.get(
       return res.status(400).json({ error: `Unknown topic '${topic}'` });
     }
 
+    const isExact = exact === "true" || exact === true;
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(MAX_LIMIT, Math.max(1, parseInt(req.query.limit, 10) || DEFAULT_LIMIT));
 
@@ -72,7 +79,8 @@ router.get(
         .limit(limit);
       total = await Deed.countDocuments(filter);
     } else {
-      const regex = new RegExp(escapeRegex(q.trim()), "i");
+      const pattern = isExact ? `^${escapeRegex(q.trim())}$` : escapeRegex(q.trim());
+      const regex = new RegExp(pattern, "i");
       filter.$or = TOPIC_FIELDS[topic].map((field) => ({ [field]: regex }));
       query = Deed.find(filter)
         .skip((page - 1) * limit)
@@ -82,19 +90,47 @@ router.get(
 
     const deeds = await query;
 
-    // Attach immediate lineage (parents/children) for context.
+    // Attach immediate lineage (parents/children) for context with populated details.
     const deedIds = deeds.map((d) => d._id);
     const relatedEdges = await Relationship.find({
       $or: [{ sourceDeedId: { $in: deedIds } }, { targetDeedId: { $in: deedIds } }],
-    });
+    })
+      .populate("sourceDeedId", "deedInfo title purchasers sellers")
+      .populate("targetDeedId", "deedInfo title purchasers sellers");
 
     const results = deeds.map((deed) => {
       const parents = relatedEdges
-        .filter((e) => String(e.targetDeedId) === String(deed._id))
-        .map((e) => e.sourceDeedId);
+        .filter((e) => {
+          const targetId = e.targetDeedId?._id ? String(e.targetDeedId._id) : String(e.targetDeedId);
+          return targetId === String(deed._id);
+        })
+        .map((e) => {
+          const src = e.sourceDeedId;
+          return {
+            _id: src?._id || src,
+            deedNumber: src?.deedInfo?.deedNumber || "(no deed no.)",
+            title: src?.title || "",
+            areaTransferred: e.areaTransferred,
+            note: e.note,
+          };
+        });
+
       const children = relatedEdges
-        .filter((e) => String(e.sourceDeedId) === String(deed._id))
-        .map((e) => e.targetDeedId);
+        .filter((e) => {
+          const sourceId = e.sourceDeedId?._id ? String(e.sourceDeedId._id) : String(e.sourceDeedId);
+          return sourceId === String(deed._id);
+        })
+        .map((e) => {
+          const tgt = e.targetDeedId;
+          return {
+            _id: tgt?._id || tgt,
+            deedNumber: tgt?.deedInfo?.deedNumber || "(no deed no.)",
+            title: tgt?.title || "",
+            areaTransferred: e.areaTransferred,
+            note: e.note,
+          };
+        });
+
       return { deed, parents, children };
     });
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { computeLayers, computePositions } from "../layout";
 import { deedLabel } from "../utils/deedLabel";
@@ -24,10 +24,47 @@ export default function LineageGraph({ workspace, onBack, initialSelectedId }) {
   const [relationships, setRelationships] = useState([]);
   const [hoveredId, setHoveredId] = useState(null);
   const [selectedId, setSelectedId] = useState(initialSelectedId || null);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const findRef = useRef(null);
 
   useEffect(() => {
     if (initialSelectedId) setSelectedId(initialSelectedId);
   }, [initialSelectedId]);
+
+  // Ctrl+F opens the find bar
+  useEffect(() => {
+    const handler = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "f") {
+        e.preventDefault();
+        setFindOpen(true);
+        setTimeout(() => findRef.current?.focus(), 0);
+      }
+      if (e.key === "Escape") {
+        setFindOpen(false);
+        setFindQuery("");
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  // IDs that match the find query
+  const findMatchIds = useMemo(() => {
+    const q = findQuery.trim().toLowerCase();
+    if (!q) return null;
+    const matched = new Set();
+    deeds.forEach((deed) => {
+      const num  = deed.deedInfo?.deedNumber?.toLowerCase() || "";
+      const buyers  = (deed.purchasers || []).map((p) => p.name?.toLowerCase() || "").join(" ");
+      const sellers = (deed.sellers    || []).map((s) => s.name?.toLowerCase() || "").join(" ");
+      const moujas  = (deed.landParcels || []).map((lp) => lp.mouja?.toLowerCase() || "").join(" ");
+      if (num.includes(q) || buyers.includes(q) || sellers.includes(q) || moujas.includes(q)) {
+        matched.add(deed._id);
+      }
+    });
+    return matched;
+  }, [findQuery, deeds]);
 
   useEffect(() => {
     api.listDeeds(workspace._id).then(setDeeds);
@@ -85,11 +122,52 @@ export default function LineageGraph({ workspace, onBack, initialSelectedId }) {
     <div className="max-w-6xl mx-auto py-8 px-4 text-ink">
       <div className="flex items-center justify-between mb-1">
         <h2 className="text-lg font-semibold font-serif">{workspace.name} — Lineage</h2>
-        {onBack && (
-          <button onClick={onBack} className="text-sm text-brass hover:underline">
-            ← Back to editing
+        <div className="flex items-center gap-3">
+          {/* Find bar */}
+          <div className={`flex items-center gap-2 transition-all overflow-hidden ${
+            findOpen ? "w-64 opacity-100" : "w-0 opacity-0 pointer-events-none"
+          }`}>
+            <div className="flex items-center bg-surface border border-border-strong rounded-lg px-2 py-1 gap-1.5 w-full shadow-md">
+              <svg className="w-3.5 h-3.5 text-ink-faint shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <input
+                ref={findRef}
+                value={findQuery}
+                onChange={(e) => setFindQuery(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Escape") { setFindOpen(false); setFindQuery(""); } }}
+                placeholder="Find deed…"
+                className="flex-1 bg-transparent text-sm text-ink placeholder:text-ink-faint focus:outline-none min-w-0"
+              />
+              {findMatchIds !== null && (
+                <span className="text-[10px] text-verdigris font-mono shrink-0">{findMatchIds.size}</span>
+              )}
+              <button
+                onClick={() => { setFindOpen(false); setFindQuery(""); }}
+                className="text-ink-faint hover:text-ink text-xs shrink-0"
+              >✕</button>
+            </div>
+          </div>
+          <button
+            onClick={() => { setFindOpen((v) => !v); if (!findOpen) { setTimeout(() => findRef.current?.focus(), 0); } else setFindQuery(""); }}
+            className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border transition-colors ${
+              findOpen
+                ? "border-verdigris text-verdigris bg-verdigris/10"
+                : "border-border text-ink-muted hover:text-ink hover:bg-surface-raised"
+            }`}
+            title="Find deed in graph (Ctrl+F)"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            Find
           </button>
-        )}
+          {onBack && (
+            <button onClick={onBack} className="text-sm text-brass hover:underline">
+              ← Back to editing
+            </button>
+          )}
+        </div>
       </div>
       <p className="text-sm text-ink-faint mb-4">
         Arrows point from a source deed to the deed(s) derived from it. A deed with several
@@ -141,24 +219,46 @@ export default function LineageGraph({ workspace, onBack, initialSelectedId }) {
           {deeds.map((deed) => {
             const pos = positions.get(deed._id);
             if (!pos) return null;
-            const dimmed = hoveredId && hoveredId !== deed._id;
+            const isFindMatch  = findMatchIds ? findMatchIds.has(deed._id) : false;
+            const isFindActive = findMatchIds !== null;
+            const dimmedByHover = hoveredId && hoveredId !== deed._id;
+            const dimmedByFind  = isFindActive && !isFindMatch;
+            const opacity = dimmedByFind ? 0.18 : dimmedByHover ? 0.4 : 1;
+            const isSelected = selectedId === deed._id;
+            const strokeColor = isSelected ? C_VERDIGRIS : isFindMatch ? "#4f9a8c" : C_BORDER_STRONG;
+            const strokeW = isSelected ? "2.5" : isFindMatch ? "2" : "1.5";
             return (
               <g
                 key={deed._id}
                 transform={`translate(${pos.x}, ${pos.y})`}
-                opacity={dimmed ? 0.4 : 1}
+                opacity={opacity}
                 onMouseEnter={() => setHoveredId(deed._id)}
                 onMouseLeave={() => setHoveredId(null)}
                 onClick={() => setSelectedId(deed._id)}
                 style={{ cursor: "pointer" }}
               >
+                {/* Glow ring for find matches */}
+                {isFindMatch && (
+                  <rect
+                    width={NODE_W + 6}
+                    height={NODE_H + 6}
+                    x="-3"
+                    y="-3"
+                    rx="11"
+                    fill="none"
+                    stroke={C_VERDIGRIS}
+                    strokeWidth="2"
+                    opacity="0.45"
+                    style={{ filter: "blur(2px)" }}
+                  />
+                )}
                 <rect
                   width={NODE_W}
                   height={NODE_H}
                   rx="8"
                   fill={C_SURFACE}
-                  stroke={selectedId === deed._id ? C_VERDIGRIS : C_BORDER_STRONG}
-                  strokeWidth={selectedId === deed._id ? "2.5" : "1.5"}
+                  stroke={strokeColor}
+                  strokeWidth={strokeW}
                 />
                 <text x="10" y="22" fontSize="12" fontWeight="600" fontFamily="Fraunces, serif" fill={C_INK}>
                   {(deedById.get(deed._id).deedInfo?.deedNumber || "(no deed no.)").slice(0, 22)}

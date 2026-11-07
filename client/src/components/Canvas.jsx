@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { api } from "../api";
 import DeedCard from "./DeedCard";
 import DeedSidebar from "./DeedSidebar";
+import PrintPosterModal from "./PrintPosterModal";
 import { blankDeed } from "./DeedForm";
 import { computeLayers, computePositions } from "../layout";
 import { customConfirm } from "../utils/confirm";
@@ -44,8 +45,8 @@ function anchorsEqual(a, b) {
 }
 
 // Must match DeedCard.jsx's card width exactly - see the comment there.
-const NODE_W = 400;
-const NODE_H_ESTIMATE = 110; // only used for layout spacing; actual dot
+const NODE_W = 420;
+const NODE_H_ESTIMATE = 180; // initial estimate; dynamic ResizeObserver calculates exact height
 // positions are measured from the real DOM so expanded cards don't break it
 const COL_GAP = 60;
 const ROW_GAP = 90;
@@ -73,6 +74,7 @@ export default function Canvas({ workspace, onView }) {
   const [selectedEdge, setSelectedEdge] = useState(null); // edge being inspected/edited via click
   const [quickFindOpen, setQuickFindOpen] = useState(false);
   const [quickFindQuery, setQuickFindQuery] = useState("");
+  const [printModalOpen, setPrintModalOpen] = useState(false);
 
   const draggingSourceRef = useRef(null);
   const cardDragRef = useRef(null);
@@ -888,11 +890,11 @@ export default function Canvas({ workspace, onView }) {
           Find
         </button>
         <button
-          onClick={() => printWorkspace(savedDeeds, savedRelationships, workspace.name)}
-          className="border border-border text-ink-muted px-3 py-1.5 rounded text-sm hover:text-ink hover:bg-surface-raised transition-colors"
-          title="Print workspace deed list"
+          onClick={() => setPrintModalOpen(true)}
+          className="border border-border text-ink-muted px-3 py-1.5 rounded text-sm hover:text-ink hover:bg-surface-raised transition-colors flex items-center gap-1.5"
+          title="Print workspace A4 tiled poster or report"
         >
-          Print
+          <span>🖨️</span> Print
         </button>
         <a
           href={api.exportWorkspaceUrl(workspace._id)}
@@ -1301,6 +1303,16 @@ export default function Canvas({ workspace, onView }) {
               />
             );
           })()}
+
+        {/* Tiled Poster & Report Printing Modal */}
+        <PrintPosterModal
+          isOpen={printModalOpen}
+          onClose={() => setPrintModalOpen(false)}
+          deeds={savedDeeds}
+          relationships={savedRelationships}
+          workspaceName={workspace.name}
+          customPositions={autoPositions}
+        />
       </div>
     </div>
   );

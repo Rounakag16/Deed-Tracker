@@ -8,6 +8,7 @@ const deedsRouter = require("./routes/deeds");
 const relationshipsRouter = require("./routes/relationships");
 const searchRouter = require("./routes/search");
 const exportRouter = require("./routes/export");
+const path = require("path");
 
 const app = express();
 app.use(cors());
@@ -20,6 +21,17 @@ app.use("/api/workspaces/:workspaceId/export", exportRouter);
 app.use("/api/search", searchRouter);
 
 app.get("/api/health", (req, res) => res.json({ ok: true }));
+
+// Serve static frontend build from client/dist if present
+const clientDistPath = path.join(__dirname, "../../client/dist");
+app.use(express.static(clientDistPath));
+
+app.get("*", (req, res, next) => {
+  if (req.path.startsWith("/api")) return next();
+  res.sendFile(path.join(clientDistPath, "index.html"), (err) => {
+    if (err) next();
+  });
+});
 
 // Generic error handler so a thrown error doesn't crash the process.
 // Mongoose validation/cast errors are the user's fault (bad input), not a

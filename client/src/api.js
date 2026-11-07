@@ -54,9 +54,10 @@ export const api = {
     }),
 
   // Returns { results, total, page, limit }
-  search: (q, topic, workspaceId, page = 1, limit = 25) => {
+  search: (q, topic, workspaceId, page = 1, limit = 25, exact = false) => {
     const params = new URLSearchParams({ q, topic, page, limit });
     if (workspaceId) params.set("workspaceId", workspaceId);
+    if (exact) params.set("exact", "true");
     return request(`/search?${params.toString()}`);
   },
 

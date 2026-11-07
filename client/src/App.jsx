@@ -2,13 +2,14 @@ import { useState, useEffect } from "react";
 import { api } from "./api";
 import WorkspaceList from "./components/WorkspaceList";
 import Canvas from "./components/Canvas";
-import SearchPanel from "./components/SearchPanel";
+import SearchWorkspace from "./components/SearchWorkspace";
 import LineageGraph from "./components/LineageGraph";
+import DeedTableView from "./components/DeedTableView";
 import CommandPalette from "./components/CommandPalette";
 
 export default function App() {
   const [workspace, setWorkspace] = useState(null);
-  const [tab, setTab] = useState("canvas"); // "canvas" | "search" | "lineage"
+  const [tab, setTab] = useState("canvas"); // "canvas" | "search" | "lineage" | "table"
   const [selectedDeedId, setSelectedDeedId] = useState(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
 
@@ -68,6 +69,17 @@ export default function App() {
           >
             Search
           </button>
+          <button
+            onClick={() => setTab("table")}
+            className={`py-3 border-b-2 text-sm px-2 flex items-center gap-1.5 ${
+              tab === "table" ? "border-brass font-medium text-ink" : "border-transparent text-ink-muted hover:text-ink"
+            }`}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M3 14h18M10 4v16M4 4h16a1 1 0 011 1v14a1 1 0 01-1 1H4a1 1 0 01-1-1V5a1 1 0 011-1z" />
+            </svg>
+            Table
+          </button>
           <div className="flex-1" />
           <button
             onClick={() => setPaletteOpen(true)}
@@ -86,7 +98,12 @@ export default function App() {
         {tab === "canvas" ? (
           <Canvas workspace={workspace} onView={() => setTab("lineage")} />
         ) : tab === "search" ? (
-          <SearchPanel workspace={workspace} onSelectDeed={handleSelectSearchResult} />
+          <SearchWorkspace workspace={workspace} />
+        ) : tab === "table" ? (
+          <DeedTableView
+            workspace={workspace}
+            onSelectDeed={handleSelectSearchResult}
+          />
         ) : (
           <LineageGraph
             workspace={workspace}
