@@ -21,29 +21,6 @@ const WIRE_PENDING = "#c98a3b"; // brass
 const WIRE_LIVE_DRAG = "#4f9a8c"; // verdigris
 const WIRE_LABEL = "#8d94a3"; // ink-muted
 
-
-function heightsEqual(a, b) {
-  if (a === b) return true;
-  if (a.size !== b.size) return false;
-  for (const [key, v] of a) {
-    if (b.get(key) !== v) return false;
-  }
-  return true;
-}
-
-function anchorsEqual(a, b) {
-  if (a === b) return true;
-  if (a.size !== b.size) return false;
-  for (const [key, v] of a) {
-    const w = b.get(key);
-    if (!w) return false;
-    if (v.top.x !== w.top.x || v.top.y !== w.top.y || v.bottom.x !== w.bottom.x || v.bottom.y !== w.bottom.y) {
-      return false;
-    }
-  }
-  return true;
-}
-
 // Must match DeedCard.jsx's card width exactly - see the comment there.
 const NODE_W = 420;
 const NODE_H_ESTIMATE = 180; // initial estimate; dynamic ResizeObserver calculates exact height
@@ -85,7 +62,6 @@ export default function Canvas({ workspace, onView }) {
   const wrapperRefs = useRef(new Map());
   const topDotRefs = useRef(new Map());
   const bottomDotRefs = useRef(new Map());
-  const [anchors, setAnchors] = useState(new Map());
   const [cardHeights, setCardHeights] = useState(new Map());
 
   const load = () => {
@@ -252,107 +228,64 @@ export default function Canvas({ workspace, onView }) {
     return { width: maxX, height: maxY };
   }, [allCards, layoutWidth, rowLayoutHeight, liveDragPos]);
 
-  // Measure real dot positions from the DOM so edges connect to wherever a
-  // card's top/bottom actually is, regardless of expanded/collapsed height.
-  const recomputeAnchors = useCallback(() => {
-    if (!contentRef.current) return;
-    const contentRect = contentRef.current.getBoundingClientRect();
-    const next = new Map();
-    // getBoundingClientRect() is measured post-transform (after contentRef's
-    // `scale(zoom)`), but the SVG the anchors feed into lives inside that
-    // same scaled container and gets scaled again when it renders - so
-    // divide the measured offsets back out by zoom to land in the
-    // unscaled coordinate space the SVG actually expects. Without this,
-    // wires drift out of position at any zoom other than 100%.
-    //
-    // Also round to the nearest half-pixel. getBoundingClientRect() on an
-    // element inside a CSS transform can return slightly different
-    // floating-point values across otherwise-identical measurements
-    // (subpixel rounding in the transform matrix, more pronounced under
-    // non-100% OS display scaling). anchorsEqual below does an exact `!==`
-    // compare, so two measurements of a position that hasn't actually
-    // moved can still register as "different" - which defeats the
-    // equality guard entirely and reintroduces the exact
-    // "Maximum update depth exceeded" loop that guard exists to prevent,
-    // via the ResizeObserver below re-firing on the resulting re-render.
-    const round = (n) => Math.round(n * 2) / 2;
-    allKeys.forEach((key) => {
-      const topEl = topDotRefs.current.get(key);
-      const bottomEl = bottomDotRefs.current.get(key);
-      if (!topEl || !bottomEl) return;
-      const tr = topEl.getBoundingClientRect();
-      const br = bottomEl.getBoundingClientRect();
-      next.set(key, {
-        top: {
-          x: round((tr.left + tr.width / 2 - contentRect.left) / zoom),
-          y: round((tr.top + tr.height / 2 - contentRect.top) / zoom),
-        },
-        bottom: {
-          x: round((br.left + br.width / 2 - contentRect.left) / zoom),
-          y: round((br.top + br.height / 2 - contentRect.top) / zoom),
-        },
+  // A manually-placed deed uses its stored position; otherwise fall back to
+  // the auto-arranged layered position. While actively dragging a card, its
+  // live (uncommitted) position wins so the move feels immediate.
+  const resolvedPos = (key, deed) => {
+    if (liveDragPos && liveDragPos.key === key) return { x: liveDragPos.x, y: liveDragPos.y };
+    if (deed.position) return deed.position;
+    return autoPositions.get(key);
+  };
+
+  // Connect wires directly to card positions in unscaled content space.
+  // Each card is NODE_W wide, with its top dot at (x + NODE_W/2, y)
+  // and bottom dot at (x + NODE_W/2, y + height).
+  // Derived synchronously as a memo so it never triggers state updates or render loops.
+  const anchors = useMemo(() => {
+    const map = new Map();
+    allCards.forEach((deed) => {
+      const key = keyFor(deed);
+      const pos = resolvedPos(key, deed);
+      if (!pos) return;
+      const h = cardHeights.get(key) || NODE_H_ESTIMATE;
+      map.set(key, {
+        top: { x: pos.x + NODE_W / 2, y: pos.y },
+        bottom: { x: pos.x + NODE_W / 2, y: pos.y + h },
       });
     });
-    // Guard against a render/measure feedback loop: only actually update
-    // state (triggering a re-render) if something really moved. Without
-    // this, any effect/observer that fires on every render (directly or
-    // indirectly) can cascade into React's "Maximum update depth exceeded".
-    setAnchors((prev) => (anchorsEqual(prev, next) ? prev : next));
-  }, [allKeys, zoom]);
+    return map;
+  }, [allCards, autoPositions, liveDragPos, cardHeights]);
 
-  // Measures each card wrapper's real rendered height so row spacing can
-  // grow to fit an expanded card (see the autoPositions/rowLayoutHeight
-  // memo above). Same equality-guard pattern as recomputeAnchors, for the
-  // same reason: an unguarded setState inside a ResizeObserver callback
-  // that itself feeds back into layout can cascade into a render loop.
-  // Same zoom-descale + subpixel-rounding fix as recomputeAnchors above,
-  // and for the same reason: this height is compared/consumed in the
-  // unscaled content coordinate space, and an exact-equality compare on
-  // a raw post-transform measurement is what let the loop through.
-  const recomputeCardHeights = useCallback(() => {
-    const next = new Map();
-    wrapperRefs.current.forEach((el, key) => {
-      if (!el) return;
-      next.set(key, Math.round((el.getBoundingClientRect().height / zoom) * 2) / 2);
-    });
-    setCardHeights((prev) => (heightsEqual(prev, next) ? prev : next));
-  }, [zoom]);
-
-  // Two separate effects on purpose, not one: recomputeAnchors reacts to
-  // autoPositions changing (so wires follow rows that grew/shrank), but
-  // recomputeCardHeights must NOT be in that same effect, because
-  // autoPositions is *derived from* cardHeights (via the memo above) - if
-  // this effect's deps included autoPositions, every cardHeights update
-  // would re-run this same effect, which measures heights again and can
-  // set cardHeights again, which changes autoPositions again... a real
-  // "Maximum update depth exceeded" loop, not just a spurious one the
-  // equality guards catch (confirmed live - see PROJECT_CONTEXT.md Known
-  // Issues). recomputeCardHeights only needs to run when the set of
-  // rendered cards changes (mount, add/remove) - the ResizeObserver below
-  // already independently catches a genuine size change to an existing
-  // card via the browser's own native resize signal, with no React
-  // dependency-cycle risk.
-  useLayoutEffect(() => {
-    recomputeAnchors();
-  }, [recomputeAnchors, autoPositions, liveDragPos, savedDeeds, draftDeeds]);
-
-  useLayoutEffect(() => {
-    recomputeCardHeights();
-  }, [recomputeCardHeights, allKeys]);
-
+  // Measures each card's real rendered height so row spacing can grow
+  // to fit taller cards. Uses offsetHeight (exact integer CSS layout pixels,
+  // unaffected by zoom/transform subpixel noise) and only updates state if a
+  // height actually changed, preventing feedback loops.
   useEffect(() => {
-    const handleResize = () => {
-      recomputeAnchors();
-      recomputeCardHeights();
+    const updateHeights = () => {
+      let changed = false;
+      setCardHeights((prev) => {
+        const next = new Map(prev);
+        wrapperRefs.current.forEach((el, key) => {
+          if (!el) return;
+          const h = el.offsetHeight;
+          if (h && next.get(key) !== h) {
+            next.set(key, h);
+            changed = true;
+          }
+        });
+        return changed ? next : prev;
+      });
     };
-    const observer = new ResizeObserver(handleResize);
-    wrapperRefs.current.forEach((el) => el && observer.observe(el));
-    window.addEventListener("resize", handleResize);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", handleResize);
-    };
-  }, [allKeys, recomputeAnchors, recomputeCardHeights]);
+
+    updateHeights();
+
+    const observer = new ResizeObserver(updateHeights);
+    wrapperRefs.current.forEach((el) => {
+      if (el) observer.observe(el);
+    });
+
+    return () => observer.disconnect();
+  }, [allKeys]);
 
   // Drag-to-wire: mousedown on a card's bottom (output) dot starts a drag;
   // dropping on another card's top (input) dot queues a link for confirmation.
@@ -414,15 +347,6 @@ export default function Canvas({ workspace, onView }) {
       window.removeEventListener("mouseup", handleUp);
     };
   }, [isDragging]);
-
-  // A manually-placed deed uses its stored position; otherwise fall back to
-  // the auto-arranged layered position. While actively dragging a card, its
-  // live (uncommitted) position wins so the move feels immediate.
-  const resolvedPos = (key, deed) => {
-    if (liveDragPos && liveDragPos.key === key) return { x: liveDragPos.x, y: liveDragPos.y };
-    if (deed.position) return deed.position;
-    return autoPositions.get(key);
-  };
 
   const commitCardPosition = (key, pos) => {
     const draft = draftDeeds.find((d) => d._tempId === key);
@@ -1150,6 +1074,7 @@ export default function Canvas({ workspace, onView }) {
                 return (
                   <div
                     key={key}
+                    data-card-key={key}
                     data-card-wrapper="true"
                     ref={(el) => {
                       if (el) wrapperRefs.current.set(key, el);

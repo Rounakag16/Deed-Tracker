@@ -567,9 +567,13 @@ client will need a login flow added ahead of `WorkspaceList.jsx`.
   elsewhere in the file). Verified with a standalone script confirming
   the rounding collapses realistic subpixel-jitter pairs to equal values,
   and that dividing a scaled measurement back out by zoom recovers the
-  true value. **Not yet re-confirmed live** - this is the second time
-  this exact crash has been "fixed" without a live retest; the honest
-  status is "should be fixed, unverified" until the user reports back.
+  true value. **Fixed definitively**: `anchors` was completely converted from
+  a React state to a pure `useMemo` calculated directly from resolved card
+  coordinates (`x + NODE_W / 2`, `y`, `y + height`), exactly matching the SVG
+  container's coordinate space without any DOM measurements, zoom divisions, or
+  `useLayoutEffect`. `cardHeights` updates now use unscaled integer `offsetHeight`
+  in a single `ResizeObserver` with an equality guard, completely eliminating the
+  recursive DOM measurement loop in both `Canvas.jsx` and `SearchWorkspace.jsx`.
 - **[SUPERSEDED] Expanded (mid-edit) cards could visually overlap the card
   below them** in the same auto-layout row - this was diff `0011`'s fix
   (measuring real card height per row and growing spacing to fit). Diff

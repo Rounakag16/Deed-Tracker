@@ -27,33 +27,6 @@ const MIN_ZOOM = 0.4;
 const MAX_ZOOM = 1.5;
 const ZOOM_STEP = 0.1;
 
-function heightsEqual(a, b) {
-  if (a === b) return true;
-  if (a.size !== b.size) return false;
-  for (const [key, v] of a) {
-    if (b.get(key) !== v) return false;
-  }
-  return true;
-}
-
-function anchorsEqual(a, b) {
-  if (a === b) return true;
-  if (a.size !== b.size) return false;
-  for (const [key, v] of a) {
-    const w = b.get(key);
-    if (!w) return false;
-    if (
-      v.top.x !== w.top.x ||
-      v.top.y !== w.top.y ||
-      v.bottom.x !== w.bottom.x ||
-      v.bottom.y !== w.bottom.y
-    ) {
-      return false;
-    }
-  }
-  return true;
-}
-
 export default function SearchWorkspace({ workspace }) {
   const [deeds, setDeeds] = useState([]);
   const [relationships, setRelationships] = useState([]);
@@ -76,7 +49,6 @@ export default function SearchWorkspace({ workspace }) {
   const wrapperRefs = useRef(new Map());
   const topDotRefs = useRef(new Map());
   const bottomDotRefs = useRef(new Map());
-  const [anchors, setAnchors] = useState(new Map());
   const [cardHeights, setCardHeights] = useState(new Map());
 
   // Load deeds & relationships for the current workspace
@@ -215,66 +187,62 @@ export default function SearchWorkspace({ workspace }) {
     return { width: maxX, height: maxY };
   }, [allCards, layoutWidth, rowLayoutHeight]);
 
-  const recomputeAnchors = useCallback(() => {
-    if (!contentRef.current) return;
-    const contentRect = contentRef.current.getBoundingClientRect();
-    const next = new Map();
-    const round = (n) => Math.round(n * 2) / 2;
-    allKeys.forEach((key) => {
-      const topEl = topDotRefs.current.get(key);
-      const bottomEl = bottomDotRefs.current.get(key);
-      if (!topEl || !bottomEl) return;
-      const tr = topEl.getBoundingClientRect();
-      const br = bottomEl.getBoundingClientRect();
-      next.set(key, {
-        top: {
-          x: round((tr.left + tr.width / 2 - contentRect.left) / zoom),
-          y: round((tr.top + tr.height / 2 - contentRect.top) / zoom),
-        },
-        bottom: {
-          x: round((br.left + br.width / 2 - contentRect.left) / zoom),
-          y: round((br.top + br.height / 2 - contentRect.top) / zoom),
-        },
-      });
-    });
-    setAnchors((prev) => (anchorsEqual(prev, next) ? prev : next));
-  }, [allKeys, zoom]);
-
-  const recomputeCardHeights = useCallback(() => {
-    const next = new Map();
-    wrapperRefs.current.forEach((el, key) => {
-      if (!el) return;
-      next.set(key, Math.round((el.getBoundingClientRect().height / zoom) * 2) / 2);
-    });
-    setCardHeights((prev) => (heightsEqual(prev, next) ? prev : next));
-  }, [zoom]);
-
-  useLayoutEffect(() => {
-    recomputeAnchors();
-  }, [recomputeAnchors, autoPositions, deeds]);
-
-  useLayoutEffect(() => {
-    recomputeCardHeights();
-  }, [recomputeCardHeights, allKeys]);
-
-  useEffect(() => {
-    const handleResize = () => {
-      recomputeAnchors();
-      recomputeCardHeights();
-    };
-    const observer = new ResizeObserver(handleResize);
-    wrapperRefs.current.forEach((el) => el && observer.observe(el));
-    window.addEventListener("resize", handleResize);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", handleResize);
-    };
-  }, [allKeys, recomputeAnchors, recomputeCardHeights]);
-
+  // A manually-placed deed uses its stored position; otherwise fall back to
+  // the auto-arranged layered position.
   const resolvedPos = (key, deed) => {
     if (deed.position) return deed.position;
     return autoPositions.get(key);
   };
+
+  // Connect wires directly to card positions in unscaled content space.
+  // Each card is NODE_W wide, with its top dot at (x + NODE_W/2, y)
+  // and bottom dot at (x + NODE_W/2, y + height).
+  // Derived synchronously as a memo so it never triggers state updates or render loops.
+  const anchors = useMemo(() => {
+    const map = new Map();
+    allCards.forEach((deed) => {
+      const key = keyFor(deed);
+      const pos = resolvedPos(key, deed);
+      if (!pos) return;
+      const h = cardHeights.get(key) || NODE_H_ESTIMATE;
+      map.set(key, {
+        top: { x: pos.x + NODE_W / 2, y: pos.y },
+        bottom: { x: pos.x + NODE_W / 2, y: pos.y + h },
+      });
+    });
+    return map;
+  }, [allCards, autoPositions, cardHeights]);
+
+  // Measures each card's real rendered height so row spacing can grow
+  // to fit taller cards. Uses offsetHeight (exact integer CSS layout pixels,
+  // unaffected by zoom/transform subpixel noise) and only updates state if a
+  // height actually changed, preventing feedback loops.
+  useEffect(() => {
+    const updateHeights = () => {
+      let changed = false;
+      setCardHeights((prev) => {
+        const next = new Map(prev);
+        wrapperRefs.current.forEach((el, key) => {
+          if (!el) return;
+          const h = el.offsetHeight;
+          if (h && next.get(key) !== h) {
+            next.set(key, h);
+            changed = true;
+          }
+        });
+        return changed ? next : prev;
+      });
+    };
+
+    updateHeights();
+
+    const observer = new ResizeObserver(updateHeights);
+    wrapperRefs.current.forEach((el) => {
+      if (el) observer.observe(el);
+    });
+
+    return () => observer.disconnect();
+  }, [allKeys]);
 
   // Pan interaction
   const startPan = (e) => {
@@ -680,6 +648,7 @@ export default function SearchWorkspace({ workspace }) {
                 return (
                   <div
                     key={key}
+                    data-card-key={key}
                     data-card-wrapper="true"
                     ref={(el) => {
                       if (el) wrapperRefs.current.set(key, el);
